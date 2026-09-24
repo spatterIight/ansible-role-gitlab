@@ -1,0 +1,76 @@
+{#
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+{% if gitlab_container_labels_traefik_enabled %}
+traefik.enable=true
+
+{% if gitlab_container_labels_traefik_docker_network %}
+traefik.docker.network={{ gitlab_container_labels_traefik_docker_network }}
+{% endif %}
+
+{% set middlewares = [] %}
+
+{% if gitlab_container_labels_traefik_compression_middleware_enabled %}
+{% set middlewares = middlewares + [gitlab_container_labels_traefik_compression_middleware_name] %}
+{% endif %}
+
+{#
+  GitLab handles being served under a path prefix on its own (see `gitlab_config_external_url`),
+  so the prefix is intentionally not stripped here.
+#}
+
+{% if gitlab_container_labels_traefik_additional_request_headers.keys() | length > 0 %}
+{% for name, value in gitlab_container_labels_traefik_additional_request_headers.items() %}
+traefik.http.middlewares.{{ gitlab_identifier }}-add-request-headers.headers.customrequestheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [gitlab_identifier + '-add-request-headers'] %}
+{% endif %}
+
+{% if gitlab_container_labels_traefik_additional_response_headers.keys() | length > 0 %}
+{% for name, value in gitlab_container_labels_traefik_additional_response_headers.items() %}
+traefik.http.middlewares.{{ gitlab_identifier }}-add-response-headers.headers.customresponseheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [gitlab_identifier + '-add-response-headers'] %}
+{% endif %}
+
+traefik.http.routers.{{ gitlab_identifier }}.rule={{ gitlab_container_labels_traefik_rule }}
+{% if gitlab_container_labels_traefik_priority | int > 0 %}
+traefik.http.routers.{{ gitlab_identifier }}.priority={{ gitlab_container_labels_traefik_priority }}
+{% endif %}
+traefik.http.routers.{{ gitlab_identifier }}.service={{ gitlab_identifier }}
+{% if middlewares | length > 0 %}
+traefik.http.routers.{{ gitlab_identifier }}.middlewares={{ middlewares | join(',') }}
+{% endif %}
+traefik.http.routers.{{ gitlab_identifier }}.entrypoints={{ gitlab_container_labels_traefik_entrypoints }}
+traefik.http.routers.{{ gitlab_identifier }}.tls={{ gitlab_container_labels_traefik_tls | to_json }}
+{% if gitlab_container_labels_traefik_tls %}
+traefik.http.routers.{{ gitlab_identifier }}.tls.certResolver={{ gitlab_container_labels_traefik_tls_certResolver }}
+{% endif %}
+
+traefik.http.services.{{ gitlab_identifier }}.loadbalancer.server.port={{ gitlab_container_http_port }}
+
+{% if gitlab_container_labels_traefik_registry_enabled %}
+{# Container registry #}
+
+traefik.http.routers.{{ gitlab_identifier }}-registry.rule={{ gitlab_container_labels_traefik_registry_rule }}
+{% if gitlab_container_labels_traefik_registry_priority | int > 0 %}
+traefik.http.routers.{{ gitlab_identifier }}-registry.priority={{ gitlab_container_labels_traefik_registry_priority }}
+{% endif %}
+traefik.http.routers.{{ gitlab_identifier }}-registry.service={{ gitlab_identifier }}-registry
+traefik.http.routers.{{ gitlab_identifier }}-registry.entrypoints={{ gitlab_container_labels_traefik_registry_entrypoints }}
+traefik.http.routers.{{ gitlab_identifier }}-registry.tls={{ gitlab_container_labels_traefik_registry_tls | to_json }}
+{% if gitlab_container_labels_traefik_registry_tls %}
+traefik.http.routers.{{ gitlab_identifier }}-registry.tls.certResolver={{ gitlab_container_labels_traefik_registry_tls_certResolver }}
+{% endif %}
+
+traefik.http.services.{{ gitlab_identifier }}-registry.loadbalancer.server.port={{ gitlab_container_registry_http_port }}
+{% endif %}
+{% endif %}
+
+{% for arg in gitlab_container_labels_additional_labels %}
+{{ arg }}
+{% endfor %}

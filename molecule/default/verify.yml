@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify GitLab
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    gitlab_verify_base_url: "http://localhost:{{ gitlab_container_http_host_bind_port }}"
+
+    # Whether this scenario configures GitLab to use an external Redis-compatible server.
+    gitlab_verify_external_redis_expected: false
+
+    gitlab_verify_units:
+      - gitlab.service
+
+  tasks:
+    - name: Verify that GitLab works
+      block:
+        - name: Run the shared GitLab verification
+          ansible.builtin.include_tasks: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/molecule/verify_tasks.yml"
+
+      rescue:
+        # Whatever went wrong, the reason is almost always in the systemd service log.
+        - name: Retrieve the GitLab systemd service log
+          ansible.builtin.command:
+            cmd: journalctl --no-pager --output=cat --lines=500 --unit=gitlab.service
+          register: gitlab_service_log
+          changed_when: false
+
+        - name: Show the GitLab systemd service log
+          ansible.builtin.debug:
+            var: gitlab_service_log.stdout_lines
+
+        - name: Fail because verification did not pass
+          ansible.builtin.fail:
+            msg: "GitLab verification failed. The systemd service log is printed above."

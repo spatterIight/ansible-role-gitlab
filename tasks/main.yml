@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Perform GitLab installation tasks
+  when: gitlab_enabled | bool
+  tags:
+    - setup-all
+    - setup-gitlab
+    - install-all
+    - install-gitlab
+  block:
+    - name: Validate GitLab configuration
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/validate_config.yml"
+    - name: Install GitLab
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
+
+- name: Perform GitLab uninstallation tasks
+  when: not gitlab_enabled | bool
+  tags:
+    - setup-all
+    - setup-gitlab
+  block:
+    - name: Uninstall GitLab
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/uninstall.yml"

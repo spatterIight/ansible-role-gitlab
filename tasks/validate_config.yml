@@ -1,0 +1,158 @@
+# SPDX-FileCopyrightText: 2023 Julian-Samuel Gebühr
+# SPDX-FileCopyrightText: 2023 - 2025 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 Suguru Hirahara
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Fail if required GitLab settings not defined
+  ansible.builtin.fail:
+    msg: >-
+      You need to define a required configuration setting (`{{ item }}`).
+  when: "lookup('vars', item, default='') | string | length == 0"
+  with_items:
+    - gitlab_uid
+    - gitlab_gid
+    - gitlab_hostname
+    - gitlab_path_prefix
+    - gitlab_container_network
+
+- name: Fail if GitLab edition is invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_edition must be 'ce' or 'ee'
+  when: "gitlab_edition not in ['ce', 'ee']"
+
+# The `gitlab.rb` file this role generates uses settings which older versions do not know about.
+# For example, GitLab 19.2 moved the NGINX settings to `gitlab_rails['nginx']`: an older version would not
+# apply them, and would try to serve HTTPS itself, without a certificate.
+- name: Fail if the GitLab version is not supported
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_version (`{{ gitlab_version }}`) must be 19.2.0 or later, as this role does not support older GitLab versions.
+  when: "(gitlab_version | string) is version('19.2.0', '<')"
+
+- name: Fail if GitLab scheme is invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_scheme must be 'http' or 'https'
+  when: "gitlab_scheme not in ['http', 'https']"
+
+- name: Fail if gitlab_path_prefix is invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_path_prefix (`{{ gitlab_path_prefix }}`) must either be `/` or start with a slash and not end with one (e.g. `/gitlab`).
+  when: "gitlab_path_prefix != '/' and (gitlab_path_prefix[0] != '/' or gitlab_path_prefix[-1] == '/')"
+
+- name: Fail if GitLab initial root password is too short
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_config_initial_root_password must be at least 8 characters long, or GitLab will refuse to create the `root` user with it.
+  when: "gitlab_config_initial_root_password | string | length > 0 and gitlab_config_initial_root_password | string | length < 8"
+
+- name: Fail if GitLab database type invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_database_type must be 'postgres' or 'bundled'
+  when: "gitlab_database_type not in ['postgres', 'bundled']"
+
+- name: Run if GitLab + Postgres integration is enabled
+  when: gitlab_database_type == 'postgres'
+  block:
+    - name: Fail if required GitLab + Postgres integration settings not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`{{ item }}`) when `gitlab_database_type` is `postgres`
+      when: "lookup('vars', item, default='') | string | length == 0"
+      with_items:
+        - gitlab_database_postgres_username
+        - gitlab_database_postgres_password
+        - gitlab_database_name
+
+    # GitLab writes the password into its `database.yml` file with Ruby's `String#inspect`,
+    # which turns these sequences into `\#{`, `\#$` and `\#@`. Those are not valid escapes in YAML,
+    # so GitLab would fail to parse its own configuration and never finish starting.
+    - name: Fail if the Postgres password for GitLab contains a sequence GitLab cannot handle
+      ansible.builtin.fail:
+        msg: >-
+          gitlab_database_postgres_password must not contain `#{`, `#$` or `#@`,
+          because GitLab fails to parse its own database configuration if it does.
+          Please choose another password.
+      when: gitlab_database_postgres_password is search('#[{$@]')
+
+    - name: Fail if Postgres socket host path for GitLab is missing when Unix socket is enabled
+      ansible.builtin.fail:
+        msg: >-
+          You need to define `gitlab_database_postgres_socket_path_host` when `gitlab_database_type` is `postgres`
+          and `gitlab_database_postgres_socket_enabled` is `true`.
+      when: >-
+        gitlab_database_postgres_socket_enabled and
+        gitlab_database_postgres_socket_path_host | string | length == 0
+
+    - name: Fail if Postgres hostname for GitLab is missing when Unix socket is disabled
+      ansible.builtin.fail:
+        msg: >-
+          You need to define `gitlab_database_postgres_hostname` when `gitlab_database_type` is `postgres`
+          and `gitlab_database_postgres_socket_enabled` is `false`.
+      when: >-
+        not gitlab_database_postgres_socket_enabled and
+        gitlab_database_postgres_hostname | string | length == 0
+
+- name: Run if the GitLab container registry is enabled
+  when: gitlab_registry_enabled | bool
+  block:
+    - name: Fail if required GitLab container registry settings not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`{{ item }}`) when `gitlab_registry_enabled` is `true`.
+      when: "lookup('vars', item, default='') | string | length == 0"
+      with_items:
+        - gitlab_registry_hostname
+
+    - name: Fail if the GitLab container registry hostname is the same as the GitLab hostname
+      ansible.builtin.fail:
+        msg: >-
+          gitlab_registry_hostname (`{{ gitlab_registry_hostname }}`) must be different from gitlab_hostname,
+          because the container registry is served on its own hostname.
+      when: gitlab_registry_hostname == gitlab_hostname
+
+- name: Fail if SMTP settings are missing (and SMTP is enabled)
+  ansible.builtin.fail:
+    msg: >-
+      You need to define a required configuration setting (`{{ item }}`) to correctly set up email via SMTP.
+  when: "gitlab_config_smtp_enabled | bool and lookup('vars', item, default='') | string | length == 0"
+  with_items:
+    - gitlab_config_smtp_address
+    - gitlab_config_email_from
+
+- name: Fail if both implicit TLS and STARTTLS are enabled for SMTP
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_config_smtp_tls and gitlab_config_smtp_enable_starttls_auto must not both be `true`,
+      because GitLab fails to send any email if they are. Use gitlab_config_smtp_tls for implicit TLS (typically on port 465),
+      or gitlab_config_smtp_enable_starttls_auto for STARTTLS (typically on port 587).
+  when: "gitlab_config_smtp_enabled | bool and gitlab_config_smtp_tls | bool and gitlab_config_smtp_enable_starttls_auto | bool"
+
+- name: Run if Traefik is enabled
+  when: gitlab_container_labels_traefik_enabled | bool
+  block:
+    - name: Fail if Traefik settings required for GitLab are not defined
+      ansible.builtin.fail:
+        msg: >-
+          You need to define a required configuration setting (`{{ item.name }}`).
+      when: "item.when | bool and lookup('vars', item.name, default='') | string | length == 0"
+      with_items:
+        - { "name": "gitlab_container_labels_traefik_hostname", when: true }
+        - { "name": "gitlab_container_labels_traefik_path_prefix", when: true }
+        - { "name": "gitlab_container_labels_traefik_compression_middleware_name", when: "{{ gitlab_container_labels_traefik_compression_middleware_enabled }}" }
+        - { "name": "gitlab_container_labels_traefik_registry_hostname", when: "{{ gitlab_container_labels_traefik_registry_enabled }}" }
+
+    # We ensure it doesn't end with a slash, because we handle both (slash and no-slash).
+    # Knowing that `gitlab_container_labels_traefik_path_prefix` does not end with a slash
+    # ensures we know how to set these routes up without having to do "does it end with a slash" checks elsewhere.
+    - name: Fail if gitlab_container_labels_traefik_path_prefix ends with a slash
+      ansible.builtin.fail:
+        msg: >-
+          gitlab_container_labels_traefik_path_prefix (`{{ gitlab_container_labels_traefik_path_prefix }}`) must either be `/` or not end with a slash (e.g. `/gitlab`).
+      when: "gitlab_container_labels_traefik_path_prefix != '/' and gitlab_container_labels_traefik_path_prefix[-1] == '/'"

@@ -1,0 +1,127 @@
+{#
+SPDX-FileCopyrightText: 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+{#
+  Renders a value as a single-quoted Ruby string literal.
+  Unlike double-quoted strings, these are not subject to `#{...}` interpolation,
+  so only backslashes and single quotes need escaping.
+#}
+{% macro rb(value) %}'{{ value | string | replace('\\', '\\\\') | replace("'", "\\'") }}'{% endmacro %}
+{% macro rb_list(values) %}[{% for value in values %}{{ rb(value) }}{% if not loop.last %}, {% endif %}{% endfor %}]{% endmacro %}
+# This file is managed by Ansible. Any changes made to it will be overwritten.
+#
+# It is applied on top of the Docker-specific defaults shipped in the container image (`/assets/gitlab.rb`).
+# For the full list of supported settings, see:
+# https://gitlab.com/gitlab-org/omnibus-gitlab/-/blob/master/files/gitlab-config-template/gitlab.rb.template
+
+external_url {{ rb(gitlab_config_external_url) }}
+
+## TLS is terminated by the reverse-proxy in front of GitLab,
+## so the bundled nginx only ever serves plain HTTP.
+gitlab_rails['nginx']['listen_port'] = {{ gitlab_container_http_port | int }}
+gitlab_rails['nginx']['listen_https'] = false
+gitlab_rails['nginx']['proxy_set_headers'] = {
+  'X-Forwarded-Proto' => {{ rb(gitlab_scheme) }},
+  'X-Forwarded-Ssl' => {{ rb('on' if gitlab_scheme == 'https' else 'off') }},
+}
+gitlab_rails['nginx']['real_ip_trusted_addresses'] = {{ rb_list(gitlab_config_trusted_proxies) }}
+gitlab_rails['nginx']['real_ip_header'] = 'X-Forwarded-For'
+gitlab_rails['nginx']['real_ip_recursive'] = 'on'
+letsencrypt['enable'] = false
+
+gitlab_rails['trusted_proxies'] = {{ rb_list(gitlab_config_trusted_proxies) }}
+
+gitlab_rails['gitlab_ssh_host'] = {{ rb(gitlab_config_gitlab_ssh_host) }}
+gitlab_rails['gitlab_shell_ssh_port'] = {{ gitlab_config_gitlab_shell_ssh_port | int }}
+
+gitlab_rails['time_zone'] = {{ rb(gitlab_config_time_zone) }}
+
+{% if gitlab_config_initial_root_password %}
+gitlab_rails['initial_root_password'] = {{ rb(gitlab_config_initial_root_password) }}
+{% endif %}
+
+gitlab_rails['usage_ping_enabled'] = {{ gitlab_config_usage_ping_enabled | bool | to_json }}
+
+prometheus_monitoring['enable'] = {{ gitlab_config_prometheus_monitoring_enabled | bool | to_json }}
+
+{% if gitlab_config_puma_worker_processes | string | length > 0 %}
+puma['worker_processes'] = {{ gitlab_config_puma_worker_processes | int }}
+{% endif %}
+{% if gitlab_config_sidekiq_concurrency | string | length > 0 %}
+sidekiq['concurrency'] = {{ gitlab_config_sidekiq_concurrency | int }}
+{% endif %}
+
+## Email
+gitlab_rails['gitlab_email_enabled'] = {{ gitlab_config_email_enabled | bool | to_json }}
+{% if gitlab_config_email_from %}
+gitlab_rails['gitlab_email_from'] = {{ rb(gitlab_config_email_from) }}
+{% endif %}
+gitlab_rails['gitlab_email_display_name'] = {{ rb(gitlab_config_email_display_name) }}
+{% if gitlab_config_email_reply_to %}
+gitlab_rails['gitlab_email_reply_to'] = {{ rb(gitlab_config_email_reply_to) }}
+{% endif %}
+
+{% if gitlab_config_smtp_enabled %}
+gitlab_rails['smtp_enable'] = true
+gitlab_rails['smtp_address'] = {{ rb(gitlab_config_smtp_address) }}
+gitlab_rails['smtp_port'] = {{ gitlab_config_smtp_port | int }}
+{% if gitlab_config_smtp_user_name %}
+gitlab_rails['smtp_user_name'] = {{ rb(gitlab_config_smtp_user_name) }}
+gitlab_rails['smtp_password'] = {{ rb(gitlab_config_smtp_password) }}
+gitlab_rails['smtp_authentication'] = {{ rb(gitlab_config_smtp_authentication) }}
+{% endif %}
+gitlab_rails['smtp_domain'] = {{ rb(gitlab_config_smtp_domain) }}
+gitlab_rails['smtp_enable_starttls_auto'] = {{ gitlab_config_smtp_enable_starttls_auto | bool | to_json }}
+gitlab_rails['smtp_tls'] = {{ gitlab_config_smtp_tls | bool | to_json }}
+gitlab_rails['smtp_openssl_verify_mode'] = {{ rb(gitlab_config_smtp_openssl_verify_mode) }}
+{% endif %}
+
+## Database
+{% if gitlab_database_type == 'postgres' %}
+postgresql['enable'] = false
+gitlab_rails['db_adapter'] = 'postgresql'
+gitlab_rails['db_encoding'] = 'utf8'
+gitlab_rails['db_host'] = {{ rb(gitlab_config_db_host) }}
+gitlab_rails['db_port'] = {{ gitlab_database_postgres_port | int }}
+gitlab_rails['db_database'] = {{ rb(gitlab_database_name) }}
+gitlab_rails['db_username'] = {{ rb(gitlab_database_postgres_username) }}
+gitlab_rails['db_password'] = {{ rb(gitlab_database_postgres_password) }}
+{% if not gitlab_database_postgres_socket_enabled %}
+gitlab_rails['db_sslmode'] = {{ rb(gitlab_database_postgres_sslmode) }}
+{% endif %}
+{% endif %}
+
+## Redis
+{% if gitlab_redis_is_configured %}
+redis['enable'] = false
+gitlab_rails['redis_host'] = {{ rb(gitlab_redis_hostname) }}
+gitlab_rails['redis_port'] = {{ gitlab_redis_port | int }}
+{% if gitlab_redis_password %}
+gitlab_rails['redis_password'] = {{ rb(gitlab_redis_password) }}
+{% endif %}
+gitlab_rails['redis_database'] = {{ gitlab_redis_database | int }}
+{% endif %}
+
+## Container registry
+{% if gitlab_registry_enabled %}
+registry_external_url {{ rb(gitlab_config_registry_external_url) }}
+registry['nginx']['listen_port'] = {{ gitlab_container_registry_http_port | int }}
+registry['nginx']['listen_https'] = false
+registry['nginx']['proxy_set_headers'] = {
+  'X-Forwarded-Proto' => {{ rb(gitlab_scheme) }},
+  'X-Forwarded-Ssl' => {{ rb('on' if gitlab_scheme == 'https' else 'off') }},
+}
+registry['nginx']['real_ip_trusted_addresses'] = {{ rb_list(gitlab_config_trusted_proxies) }}
+registry['nginx']['real_ip_header'] = 'X-Forwarded-For'
+registry['nginx']['real_ip_recursive'] = 'on'
+{% else %}
+registry['enable'] = false
+gitlab_rails['registry_enabled'] = false
+{% endif %}
+
+{% if gitlab_configuration_extension_rb %}
+## Additional configuration (gitlab_configuration_extension_rb)
+{{ gitlab_configuration_extension_rb }}
+{% endif %}
