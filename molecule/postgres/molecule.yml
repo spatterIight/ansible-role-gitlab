@@ -1,0 +1,96 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+# SPDX-FileCopyrightText: 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    force: true
+driver:
+  name: docker
+platforms:
+  - name: gitlab-${MOLECULE_DISTRO:-ubuntu2604}-postgres
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2604}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    # Also what gives the inner Docker a /dev/fuse to hand to fuse-overlayfs.
+    # See prepare.yml for why that storage driver is not the fleet's usual vfs.
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+  inventory:
+    group_vars:
+      all:
+        # Helper variables
+        gitlab_debug_service_enabled: false
+        gitlab_restarts_check_enabled: true
+
+        # Variables for GitLab
+        gitlab_uid: 1000
+        gitlab_gid: 1000
+        gitlab_scheme: http
+        gitlab_hostname: localhost
+        gitlab_container_labels_traefik_enabled: false
+        gitlab_container_http_host_bind_port: 8080
+        gitlab_container_ssh_host_bind_port: 2222
+        gitlab_config_initial_root_password: Molecule-Test-Pass-9471
+
+        # Variables required for GitLab to connect to the Postgres database (via Unix socket)
+        gitlab_database_type: postgres
+        gitlab_database_postgres_username: my_database_username
+        # Deliberately contains characters which need escaping in `gitlab.rb` (a Ruby file),
+        # so that a mistake there fails the database connection rather than going unnoticed.
+        # (Sequences like `#{` are not used, as GitLab itself cannot handle them. See `tasks/validate_config.yml`.)
+        gitlab_database_postgres_password: "my_database\"pass#word\\"
+        gitlab_database_name: gitlab
+        gitlab_database_postgres_socket_enabled: true
+        gitlab_database_postgres_socket_path_host: "{{ postgres_run_path }}"
+        gitlab_systemd_required_services_list_auto: |
+          {{
+            (['postgres.service'])
+          }}
+
+        # Variables for Postgres
+        postgres_uid: 1000
+        postgres_gid: 1000
+        postgres_connection_password: postgres_password
+        postgres_container_unix_socket_enabled: true
+        postgres_managed_databases: |
+          {{
+            [{
+              'name': gitlab_database_name,
+              'username': gitlab_database_postgres_username,
+              'password': gitlab_database_postgres_password,
+            }]
+          }}
+  env:
+    # Workaround for https://github.com/ansible/molecule/issues/4391
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles
+scenario:
+  # See: https://docs.ansible.com/projects/molecule/configuration/?h=test_sequence#scenario
+  test_sequence:
+    - dependency
+    - cleanup
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    # Disable idempotence test for now due to ansible-role-postgres
+    # - idempotence
+    - side_effect
+    - verify
+    - cleanup
+    - destroy
+verifier:
+  name: ansible

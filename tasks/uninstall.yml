@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 Suguru Hirahara
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Check existence of GitLab systemd service
+  ansible.builtin.stat:
+    path: "{{ devture_systemd_docker_base_systemd_path }}/{{ gitlab_identifier }}.service"
+  register: gitlab_service_stat
+
+- name: Uninstall GitLab systemd services and files
+  when: gitlab_service_stat.stat.exists | bool
+  block:
+    - name: Ensure GitLab systemd service is stopped
+      ansible.builtin.service:
+        name: "{{ gitlab_identifier }}"
+        state: stopped
+        enabled: false
+        daemon_reload: true
+
+    - name: Ensure GitLab systemd service does not exist
+      ansible.builtin.file:
+        path: "{{ devture_systemd_docker_base_systemd_path }}/{{ gitlab_identifier }}.service"
+        state: absent
+
+    - name: Ensure GitLab support files do not exist
+      ansible.builtin.file:
+        path: "{{ gitlab_base_path }}/{{ item }}"
+        state: absent
+      with_items:
+        - env
+        - labels
+
+    - name: Ensure GitLab logs path does not exist
+      ansible.builtin.file:
+        path: "{{ gitlab_logs_path }}"
+        state: absent
+
+    - name: Ensure GitLab base path does not exist if empty
+      ansible.builtin.command:
+        cmd: "rmdir {{ gitlab_base_path }}"
+      register: gitlab_base_path_deletion_result
+      changed_when: gitlab_base_path_deletion_result.rc == 0
+      failed_when: false
+
+    - name: Ensure GitLab container network does not exist
+      when: gitlab_container_network_deletion_enabled
+      block:
+        - name: Ensure GitLab container network does not exist via community.docker.docker_network
+          when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
+          community.docker.docker_network:
+            name: "{{ gitlab_container_network }}"
+            state: absent
+          register: gitlab_network_deletion_result
+
+        - name: Ensure GitLab container network does not exist via ansible.builtin.command
+          when: devture_systemd_docker_base_container_network_creation_method == 'command'
+          ansible.builtin.command:
+            cmd: >-
+              {{ devture_systemd_docker_base_host_command_docker }} network rm
+              {{ gitlab_container_network }}
+          register: gitlab_network_deletion_result
+          changed_when: gitlab_container_network in gitlab_network_deletion_result.stdout
+
+- name: Check existence of GitLab local data paths
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: gitlab_data_paths_stat
+  with_items:
+    - "{{ gitlab_config_path }}"
+    - "{{ gitlab_data_path }}"
+
+# We just want to notify the user. Deleting data is too destructive.
+# The configuration path is kept as well, because it contains GitLab's secrets (`gitlab-secrets.json`),
+# without which the encrypted data in the database cannot be read anymore.
+- name: Inject the message about the remaining GitLab local data paths
+  when: gitlab_data_paths_stat.results | selectattr('stat.exists') | list | length > 0
+  ansible.builtin.set_fact:
+    devture_playbook_runtime_messages_list: |
+      {{
+        devture_playbook_runtime_messages_list | default([])
+        +
+        [
+          "Note: As the local GitLab instance has been removed, some old data remains in `" + (gitlab_data_paths_stat.results | selectattr('stat.exists') | map(attribute='item') | join('`, `')) + "`. Feel free to delete it."
+        ]
+      }}

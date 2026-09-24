@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+# Signs in to GitLab's web interface as `root` with `gitlab_verify_sign_in_password`,
+# and stores the response of the sign-in form submission in the variable named by
+# `gitlab_verify_sign_in_result_var`.
+- name: Retrieve a fresh GitLab sign-in page
+  ansible.builtin.uri:
+    url: "{{ gitlab_verify_base_url }}/users/sign_in"
+    method: GET
+    return_content: true
+  register: gitlab_verify_sign_in_page
+
+- name: Submit the GitLab sign-in form
+  ansible.builtin.uri:
+    url: "{{ gitlab_verify_base_url }}/users/sign_in"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      authenticity_token: "{{ gitlab_verify_sign_in_page.content | regex_search('name=\"authenticity_token\" value=\"([^\"]+)\"', '\\1') | first }}"
+      user[login]: root
+      user[password]: "{{ gitlab_verify_sign_in_password }}"
+      user[remember_me]: "0"
+    headers:
+      Cookie: "{{ gitlab_verify_sign_in_page.cookies_string }}"
+    follow_redirects: none
+    status_code: [200, 302, 422]
+  register: gitlab_verify_sign_in_submission
+  no_log: true
+
+# With redirects not followed, a successful sign-in (302) does not populate `cookies`
+# in the result, so the new session cookie is taken from the `Set-Cookie` header instead.
+- name: Store the result of the GitLab sign-in
+  ansible.builtin.set_fact:
+    "{{ gitlab_verify_sign_in_result_var }}":
+      status: "{{ gitlab_verify_sign_in_submission.status }}"
+      location: "{{ gitlab_verify_sign_in_submission.location | default('') }}"
+      session: "{{ gitlab_verify_sign_in_submission.set_cookie | default('') | regex_search('_gitlab_session=([^;]+)', '\\1') | default([''], true) | first }}"

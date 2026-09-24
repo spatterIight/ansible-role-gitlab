@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>mother-of-all-self-hosting/renovate-config#v1.1.0"
+  ],
+  "packageRules": [
+    {
+      "description": "GitLab's image tags carry the edition and a package revision (e.g. `19.4.1-ce.0`), while `gitlab_version` only holds the version itself (e.g. `19.4.1`). GitLab version bumps are never automerged, as upgrades across minor versions may need to go through required upgrade stops (see docs/configuring-gitlab.md).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["gitlab/gitlab-ce"],
+      "extractVersion": "^(?<version>\\d+\\.\\d+\\.\\d+)-ce\\.0$"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{#
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2024 Nikita Chernyi
+SPDX-FileCopyrightText: 2025 Suguru Hirahara
+SPDX-FileCopyrightText: 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+[Unit]
+Description=GitLab ({{ gitlab_identifier }})
+{% for service in gitlab_systemd_required_services_list %}
+Requires={{ service }}
+After={{ service }}
+{% endfor %}
+{% for service in gitlab_systemd_wanted_services_list %}
+Wants={{ service }}
+{% endfor %}
+DefaultDependencies=no
+
+[Service]
+Type=simple
+Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
+ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_container_cleanup_command | trim | replace("\n", " ") }}'
+
+{#
+  Unlike most services, the GitLab Omnibus container cannot run with `--user` or `--read-only`:
+  it runs `gitlab-ctl reconfigure` on every start (which writes to the filesystem and fixes up ownership),
+  and then supervises multiple services (Puma, Sidekiq, Gitaly, nginx, sshd, etc.), each as its own dedicated user.
+
+  Instead, all capabilities are dropped except for the ones needed to do that:
+  - CHOWN, DAC_OVERRIDE, FOWNER, FSETID: for managing the ownership and permissions of files
+  - SETUID, SETGID: for running each service as its own user
+  - KILL: for supervising (signaling) those services
+  - NET_BIND_SERVICE: for nginx and sshd to listen on privileged ports
+  - SYS_CHROOT, AUDIT_WRITE: for sshd (Git over SSH)
+#}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
+      --rm \
+      --name={{ gitlab_identifier }} \
+      --log-driver=none \
+      --network={{ gitlab_container_network }} \
+      --cap-drop=ALL \
+      --cap-add=CHOWN \
+      --cap-add=DAC_OVERRIDE \
+      --cap-add=FOWNER \
+      --cap-add=FSETID \
+      --cap-add=SETUID \
+      --cap-add=SETGID \
+      --cap-add=KILL \
+      --cap-add=NET_BIND_SERVICE \
+      --cap-add=SYS_CHROOT \
+      --cap-add=AUDIT_WRITE \
+      --security-opt=no-new-privileges \
+      --shm-size={{ gitlab_container_shm_size }} \
+      {% if gitlab_container_hostname %}
+      --hostname={{ gitlab_container_hostname }} \
+      {% endif %}
+      {% if gitlab_container_http_host_bind_port %}
+      -p {{ gitlab_container_http_host_bind_port }}:{{ gitlab_container_http_port }} \
+      {% endif %}
+      {% if gitlab_container_ssh_host_bind_port %}
+      -p {{ gitlab_container_ssh_host_bind_port }}:22 \
+      {% endif %}
+      {% if gitlab_registry_enabled and gitlab_container_registry_http_host_bind_port %}
+      -p {{ gitlab_container_registry_http_host_bind_port }}:{{ gitlab_container_registry_http_port }} \
+      {% endif %}
+      --env-file={{ gitlab_base_path }}/env \
+      --label-file={{ gitlab_base_path }}/labels \
+      --mount type=bind,src={{ gitlab_config_path }},dst=/etc/gitlab \
+      --mount type=bind,src={{ gitlab_logs_path }},dst=/var/log/gitlab \
+      --mount type=bind,src={{ gitlab_data_path }},dst=/var/opt/gitlab \
+      {% if gitlab_database_type == 'postgres' and gitlab_database_postgres_socket_enabled and gitlab_database_postgres_socket_path_host != '' %}
+      --mount type=bind,src={{ gitlab_database_postgres_socket_path_host }},dst={{ gitlab_database_postgres_socket_path_container }} \
+      {% endif %}
+      {% if gitlab_redis_is_configured and gitlab_redis_socket_enabled and gitlab_redis_socket_path_host != '' %}
+      --mount type=bind,src={{ gitlab_redis_socket_path_host }},dst={{ gitlab_redis_socket_path_container }} \
+      {% endif %}
+      {% for volume in gitlab_container_additional_volumes %}
+      --mount type={{ volume.type | default('bind' if '/' in volume.src else 'volume') }},src={{ volume.src }},dst={{ volume.dst }}{{ (',' + volume.options) if volume.options | default('') else '' }} \
+      {% endfor %}
+      {% for arg in gitlab_container_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+      {{ gitlab_container_image }}
+
+{% for network in gitlab_container_additional_networks %}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ gitlab_identifier }}
+{% endfor %}
+
+ExecStart={{ devture_systemd_docker_base_host_command_docker }} start --attach {{ gitlab_identifier }}
+
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} stop -t {{ gitlab_container_stop_grace_time_seconds }} {{ gitlab_identifier }} 2>/dev/null || true'
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} rm {{ gitlab_identifier }} 2>/dev/null || true'
+
+{# Leave enough time for `docker stop` above to finish gracefully, before systemd kills it. #}
+TimeoutStopSec={{ gitlab_container_stop_grace_time_seconds | int + 30 }}
+Restart=always
+RestartSec=30
+SyslogIdentifier={{ gitlab_identifier }}
+
+[Install]
+WantedBy=multi-user.target
