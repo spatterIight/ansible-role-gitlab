@@ -8,6 +8,8 @@ name: Autotag releases
 
 on:  # yamllint disable-line rule:truthy
   push:
+    # This repository's default branch. Work happens on `develop` and is released
+    # by merging it here, so only commits landing on `main` are tagged.
     branches:
       - main
   workflow_dispatch:
