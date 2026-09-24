@@ -64,6 +64,46 @@
     fail_msg: "GitLab did not serve its sign-in page (got {{ gitlab_sign_in_page.status | default('no response') }})"
     success_msg: "GitLab serves its sign-in page"
 
+# The sign-in page can already respond while `gitlab-ctl reconfigure` is still running: its last steps
+# (clearing the cache, signalling and restarting services) can then drop the requests below mid-flight.
+# So GitLab is only considered started once no reconfigure (a `cinc-client` process) runs in the container.
+# `! pgrep` succeeds only if the container runs and has no such process, so a failing `docker exec` keeps waiting.
+# (The `[t]` keeps the pattern from matching the command line of the `sh` running it.)
+- name: Wait for GitLab to finish reconfiguring itself (up to 10m)
+  ansible.builtin.command:
+    cmd: docker exec gitlab sh -c '! pgrep -f "cinc-clien[t]"'
+  register: gitlab_reconfigure_done
+  until: gitlab_reconfigure_done.rc == 0
+  retries: 120
+  delay: 5
+  changed_when: false
+  failed_when: false
+
+- name: Assert that GitLab finished reconfiguring itself
+  ansible.builtin.assert:
+    that: gitlab_reconfigure_done.rc == 0
+    fail_msg: "GitLab was still reconfiguring itself after 10 minutes (or its container is not running)"
+    success_msg: "GitLab finished reconfiguring itself"
+
+# Services restarted at the end of the reconfigure take a moment to respond again.
+- name: Wait for the GitLab sign-in page to respond after reconfiguring (up to 5m)
+  ansible.builtin.uri:
+    url: "{{ gitlab_verify_base_url }}/users/sign_in"
+    method: GET
+    follow_redirects: none
+    status_code: [200, 301, 302, 404, 500, 502, 503]
+  register: gitlab_sign_in_page
+  until: gitlab_sign_in_page.status == 200
+  retries: 60
+  delay: 5
+  failed_when: false
+
+- name: Assert that the GitLab sign-in page responds after reconfiguring
+  ansible.builtin.assert:
+    that: gitlab_sign_in_page.status == 200
+    fail_msg: "GitLab did not serve its sign-in page after reconfiguring (got {{ gitlab_sign_in_page.status | default('no response') }})"
+    success_msg: "GitLab serves its sign-in page after reconfiguring"
+
 # A negative control for the checks that follow. If the API were reachable without
 # signing in, "signed in successfully" and "reported this version" would prove nothing.
 - name: Request the GitLab API without signing in

@@ -63,7 +63,7 @@ Tests a standard GitLab installation with an external Postgres database (via a U
 
 The verification does not stop at "the systemd service is active" — the unit is `Restart=always`, so a crash-looping container reports `active` too. It:
 
-- waits for GitLab's sign-in page rather than for the unit, since on its first start GitLab needs minutes to set up its database before any of its web services come up
+- waits for GitLab's sign-in page rather than for the unit, since on its first start GitLab needs minutes to set up its database before any of its web services come up, and then for GitLab to finish reconfiguring itself, as its last steps can restart services after the sign-in page already responds
 - establishes that the API refuses unauthenticated requests and that a wrong password is rejected, so that the two checks below are able to fail in the first place
 - signs in as `root` with the password the role writes into `gitlab.rb` (`gitlab_config_initial_root_password`). A GitLab running on anything but the role's configuration generates a random password instead
 - asserts that the running GitLab reports the version `gitlab_version` pins and the expected edition, via `/api/v4/version`
