@@ -33,9 +33,6 @@ gitlab_data_path: "{{ gitlab_base_path }}/data"
 #
 # This role supports GitLab 19.2 and later only, as the `gitlab.rb` file it generates uses settings
 # which older versions do not know about (see `tasks/validate_config.yml`).
-#
-# When upgrading an existing installation, GitLab needs to go through its required upgrade stops,
-# so it may be necessary to override this temporarily. See `docs/configuring-gitlab.md` for details.
 # renovate: datasource=docker depName=gitlab/gitlab-ce versioning=semver
 gitlab_version: 19.4.1
 
