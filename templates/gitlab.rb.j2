@@ -96,12 +96,8 @@ gitlab_rails['db_sslmode'] = {{ rb(gitlab_database_postgres_sslmode) }}
 ## Redis
 {% if gitlab_redis_is_configured %}
 redis['enable'] = false
-{% if gitlab_redis_socket_enabled %}
-gitlab_rails['redis_socket'] = {{ rb(gitlab_redis_socket_path_container + gitlab_redis_socket_path) }}
-{% else %}
 gitlab_rails['redis_host'] = {{ rb(gitlab_redis_hostname) }}
 gitlab_rails['redis_port'] = {{ gitlab_redis_port | int }}
-{% endif %}
 {% if gitlab_redis_password %}
 gitlab_rails['redis_password'] = {{ rb(gitlab_redis_password) }}
 {% endif %}

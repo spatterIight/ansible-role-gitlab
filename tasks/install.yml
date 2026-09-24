@@ -71,6 +71,65 @@
   until: gitlab_container_image_pull_result_command is not failed
   changed_when: "'Downloaded newer image' in gitlab_container_image_pull_result_command.stdout"
 
+# When it's started, GitLab checks whether it can be upgraded directly from the version it was running before,
+# and refuses to start if it cannot (e.g. when a required upgrade stop was skipped). As the systemd service
+# restarts it, GitLab would then remain down, trying to start over and over.
+#
+# The same check is done here instead, with GitLab's own tool from the new container image, before the systemd
+# service is pointed to that image. This way, the playbook run fails with an explanation, and GitLab stays up.
+- name: Check whether GitLab can be upgraded to the configured version
+  when: gitlab_upgrade_check_enabled | bool
+  block:
+    - name: Check for the version file of an existing GitLab installation
+      ansible.builtin.stat:
+        path: "{{ gitlab_data_path }}/gitlab-rails/VERSION"
+      register: gitlab_installed_version_file_stat
+
+    - name: Read the version file of the existing GitLab installation
+      when: gitlab_installed_version_file_stat.stat.exists
+      ansible.builtin.slurp:
+        src: "{{ gitlab_data_path }}/gitlab-rails/VERSION"
+      register: gitlab_installed_version_file
+
+    # The file contains the version GitLab ran when it was last started, possibly with a suffix (e.g. `19.4.1-ee`).
+    - name: Determine the version of the existing GitLab installation
+      ansible.builtin.set_fact:
+        gitlab_installed_version: >-
+          {{
+            (gitlab_installed_version_file.content | b64decode | trim | regex_search('^[0-9]+\.[0-9]+\.[0-9]+') or '')
+            if gitlab_installed_version_file_stat.stat.exists
+            else ''
+          }}
+
+    - name: Fail if GitLab would be downgraded
+      ansible.builtin.fail:
+        msg: >-
+          GitLab {{ gitlab_installed_version }} is installed, but gitlab_version is set to {{ gitlab_version }}.
+          Downgrading GitLab is not supported.
+      when: "gitlab_installed_version != '' and gitlab_installed_version is version(gitlab_version | string, '>')"
+
+    - name: Check whether GitLab can be upgraded directly from the existing installation
+      when: "gitlab_installed_version != '' and gitlab_installed_version is version(gitlab_version | string, '<')"
+      ansible.builtin.command:
+        cmd: >-
+          {{ devture_systemd_docker_base_host_command_docker }} run
+          --rm
+          --network=none
+          {{ gitlab_container_image }}
+          /opt/gitlab/bin/gitlab-ctl upgrade-check {{ gitlab_installed_version }} {{ gitlab_version }}
+      register: gitlab_upgrade_check_result
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if GitLab cannot be upgraded directly from the existing installation
+      ansible.builtin.fail:
+        msg: >-
+          GitLab cannot be upgraded directly from {{ gitlab_installed_version }} (the installed version) to {{ gitlab_version }}.
+          Upgrade to the required upgrade stop(s) in between first, by setting gitlab_version to each of them in turn.
+          See https://docs.gitlab.com/update/upgrade_paths/ for details.
+          GitLab says: {{ (gitlab_upgrade_check_result.stderr_lines + gitlab_upgrade_check_result.stdout_lines) | join(' ') }}
+      when: "gitlab_upgrade_check_result.rc | default(0) != 0"
+
 - name: Ensure GitLab container network is created via community.docker.docker_network
   when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
   community.docker.docker_network:

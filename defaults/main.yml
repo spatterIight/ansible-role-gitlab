@@ -29,6 +29,13 @@ gitlab_logs_path: "{{ gitlab_base_path }}/logs"
 # This holds the Git repositories, uploads, and (if `gitlab_database_type: bundled`) the database.
 gitlab_data_path: "{{ gitlab_base_path }}/data"
 
+# The GitLab version to install.
+#
+# This role supports GitLab 19.2 and later only, as the `gitlab.rb` file it generates uses settings
+# which older versions do not know about (see `tasks/validate_config.yml`).
+#
+# When upgrading an existing installation, GitLab needs to go through its required upgrade stops,
+# so it may be necessary to override this temporarily. See `docs/configuring-gitlab.md` for details.
 # renovate: datasource=docker depName=gitlab/gitlab-ce versioning=semver
 gitlab_version: 19.4.1
 
@@ -92,6 +99,13 @@ gitlab_container_http_host_bind_port: ""
 # Note: port 22 on the host is usually taken by the host's own SSH server, so another port (e.g. `2222`) is typically used.
 # The port specified here is also advertised by GitLab in the SSH clone URLs (see `gitlab_config_gitlab_shell_ssh_port`).
 gitlab_container_ssh_host_bind_port: ""
+
+# Controls whether the SSH server inside the container (used for Git over SSH) runs.
+#
+# By default, it only runs if its port is published (see `gitlab_container_ssh_host_bind_port`),
+# as there is no other way to reach it. If you make it reachable in another way
+# (e.g. via a Traefik TCP router, defined with `gitlab_container_labels_additional_labels_custom`), set this to `true`.
+gitlab_ssh_enabled: "{{ gitlab_container_ssh_host_bind_port | string | length > 0 }}"
 
 # The port number that the container registry is served on (via HTTP) inside the container.
 # Only relevant if `gitlab_registry_enabled` is `true`.
@@ -267,6 +281,11 @@ gitlab_systemd_wanted_services_list_default: []
 gitlab_systemd_wanted_services_list_auto: []
 gitlab_systemd_wanted_services_list_custom: []
 
+# Controls whether the role checks, before installing a new GitLab version, that GitLab can be upgraded
+# to it directly from the version it currently runs (i.e. without skipping a required upgrade stop),
+# and that it's not being downgraded. See `../tasks/install.yml` for details.
+gitlab_upgrade_check_enabled: true
+
 # Controls how long to wait for the container to stop gracefully before killing it.
 #
 # Unlike most services, GitLab runs a whole fleet of processes (Puma, Sidekiq, Gitaly, nginx, and possibly PostgreSQL and Redis)
@@ -356,8 +375,11 @@ gitlab_config_db_host: "{{ gitlab_database_postgres_socket_path_container if git
 ########################################################################
 
 # By default, GitLab uses the Redis server which is bundled in its container image.
-# It can be configured to use an external Redis-compatible server (e.g. Valkey) by specifying
-# `gitlab_redis_hostname` or `gitlab_redis_socket_path_host`.
+# It can be configured to use an external Redis-compatible server (e.g. Valkey) by specifying `gitlab_redis_hostname`.
+#
+# Connecting via a Unix socket is intentionally not supported: GitLab's services run as users which only exist
+# inside its container (e.g. `git`), which cannot access the socket directories of other containers
+# (e.g. the one of ansible-role-valkey, which is only accessible to its own user).
 gitlab_redis_hostname: ""
 gitlab_redis_password: ""
 gitlab_redis_port: 6379
@@ -366,19 +388,7 @@ gitlab_redis_port: 6379
 # Use a dedicated one if the server is shared with other services.
 gitlab_redis_database: 0
 
-# Controls if the connection to the Redis-compatible server is made via a Unix socket
-gitlab_redis_socket_enabled: false
-
-# Specify the path to the directory containing the Unix socket on the host (bind-mount source)
-gitlab_redis_socket_path_host: ""
-
-# Specify the path to the directory containing the Unix socket inside the GitLab container
-gitlab_redis_socket_path_container: /run-valkey
-
-# Specify the name of the Unix socket file (in the directory above)
-gitlab_redis_socket_path: /valkey.sock
-
-gitlab_redis_is_configured: "{{ gitlab_redis_hostname != '' or (gitlab_redis_socket_enabled and gitlab_redis_socket_path_host != '') }}"
+gitlab_redis_is_configured: "{{ gitlab_redis_hostname != '' }}"
 
 ########################################################################
 #                                                                      #
@@ -419,7 +429,12 @@ gitlab_config_external_url: "{{ gitlab_scheme }}://{{ gitlab_hostname }}{{ gitla
 # gitlab_config_trusted_proxies controls `gitlab_rails['trusted_proxies']` and `gitlab_rails['nginx']['real_ip_trusted_addresses']`,
 # which lets GitLab see the real IP address of clients connecting via a reverse-proxy (e.g. Traefik).
 #
-# By default, all private IP address ranges (which container networks use) are trusted.
+# By default, all private IP address ranges are trusted, because container networks (and therefore a reverse-proxy
+# running in a container) may use any of them. Anything connecting from a trusted address can claim to be any client
+# via the `X-Forwarded-For` header, which GitLab then uses for its rate limits, logs and IP address restrictions.
+#
+# If you publish GitLab's HTTP port (`gitlab_container_http_host_bind_port`) where clients from a private network
+# (e.g. your LAN) can connect to it directly, narrow this down to the address(es) of your reverse-proxy.
 gitlab_config_trusted_proxies:
   - 10.0.0.0/8
   - 172.16.0.0/12
@@ -485,9 +500,12 @@ gitlab_config_smtp_password: ""
 gitlab_config_smtp_domain: "{{ gitlab_hostname }}"
 # Valid values: login, plain, cram_md5
 gitlab_config_smtp_authentication: login
-gitlab_config_smtp_enable_starttls_auto: true
 # Set to `true` for implicit TLS (typically on port 465).
 gitlab_config_smtp_tls: false
+# Controls whether the connection is upgraded to TLS via STARTTLS (typically on port 587).
+# Implicit TLS and STARTTLS are mutually exclusive (GitLab fails to send any email if both are enabled),
+# so this is disabled automatically when `gitlab_config_smtp_tls` is enabled.
+gitlab_config_smtp_enable_starttls_auto: "{{ not gitlab_config_smtp_tls | bool }}"
 # Valid values: none, peer
 gitlab_config_smtp_openssl_verify_mode: peer
 

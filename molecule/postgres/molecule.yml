@@ -42,7 +42,8 @@ provisioner:
         gitlab_hostname: localhost
         gitlab_container_labels_traefik_enabled: false
         gitlab_container_http_host_bind_port: 8080
-        gitlab_container_ssh_host_bind_port: 2222
+        # Deliberately not publishing the SSH port, so that this scenario tests that GitLab works
+        # without its SSH server (and the capabilities it needs), which the role then does not start.
         gitlab_config_initial_root_password: Molecule-Test-Pass-9471
 
         # Variables required for GitLab to connect to the Postgres database (via Unix socket)

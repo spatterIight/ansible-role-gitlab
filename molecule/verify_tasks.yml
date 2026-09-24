@@ -145,6 +145,11 @@
       expected {{ gitlab_defaults.gitlab_version }} ({{ gitlab_edition | default(gitlab_defaults.gitlab_edition) }})
     success_msg: "GitLab reports {{ gitlab_version.json.version }}"
 
+# The SSH server inside the container only runs if its port is published, which differs between scenarios.
+- name: Determine whether the GitLab SSH server is expected to run
+  ansible.builtin.set_fact:
+    gitlab_verify_ssh_expected: "{{ gitlab_container_ssh_host_bind_port | default('') | string | length > 0 }}"
+
 - name: Retrieve the services running inside the GitLab container
   ansible.builtin.command:
     cmd: docker exec gitlab gitlab-ctl status
@@ -164,7 +169,7 @@
       - "'run: puma:' in gitlab_ctl_status.stdout"
       - "'run: sidekiq:' in gitlab_ctl_status.stdout"
       - "'run: gitaly:' in gitlab_ctl_status.stdout"
-      - "'run: sshd:' in gitlab_ctl_status.stdout"
+      - "('run: sshd:' in gitlab_ctl_status.stdout) == (gitlab_verify_ssh_expected | bool)"
       - "'down:' not in gitlab_ctl_status.stdout"
     fail_msg: "Unexpected set of services inside the GitLab container: {{ gitlab_ctl_status.stdout_lines }}"
     success_msg: "The expected set of services runs inside the GitLab container"
@@ -172,12 +177,12 @@
 # Git over SSH is served by an OpenSSH server inside the container, published on
 # `gitlab_container_ssh_host_bind_port`.
 - name: Wait for the GitLab SSH server to greet on the published port
+  when: gitlab_verify_ssh_expected | bool
   ansible.builtin.wait_for:
     host: localhost
     port: "{{ gitlab_container_ssh_host_bind_port }}"
     search_regex: OpenSSH
     timeout: 30
-  register: gitlab_ssh
 
 - name: Verify the container registry
   when: gitlab_registry_enabled | default(false) | bool
@@ -279,4 +284,4 @@
       - "GitLab sign-in with a wrong password: HTTP {{ gitlab_sign_in_wrong.status }}"
       - "GitLab sign-in with the configured credentials: HTTP {{ gitlab_sign_in.status }}"
       - "GitLab services: {{ gitlab_ctl_status.stdout_lines | map('regex_replace', '^(\\w+: [\\w-]+):.*$', '\\1') | list }}"
-      - "GitLab SSH: {{ 'greets' if gitlab_ssh is succeeded else 'silent' }} on port {{ gitlab_container_ssh_host_bind_port }}"
+      - "GitLab SSH: {{ ('greets on port ' ~ gitlab_container_ssh_host_bind_port) if gitlab_verify_ssh_expected | bool else 'not running (its port is not published)' }}"

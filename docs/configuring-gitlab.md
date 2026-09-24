@@ -140,17 +140,8 @@ gitlab_container_additional_networks_custom:
   - YOUR_REDIS_SERVER_CONTAINER_NETWORK_HERE
 ```
 
-It's also possible to connect to it via a Unix socket, with the following configuration:
-
-```yaml
-gitlab_redis_socket_enabled: true
-
-# Specify the path to the directory containing the Unix socket on the host (bind-mount source)
-gitlab_redis_socket_path_host: /valkey/run
-```
-
 >[!NOTE]
-> GitLab's services run as users which only exist inside its container (e.g. `git`, with the UID 998), so the socket and the directory containing it need to be accessible to them. This is not the case with ansible-role-valkey, whose socket directory is only accessible to its own user, so connect to it via TCP instead.
+> Connecting to the server via a Unix socket is not supported. GitLab's services run as users which only exist inside its container (e.g. `git`, with the UID 998), which cannot access the socket directories of other containers (e.g. the one of ansible-role-valkey, which is only accessible to its own user).
 
 If the server is shared with other services, consider setting `gitlab_redis_database` to a database number that is not used by any other service.
 
@@ -167,6 +158,8 @@ gitlab_container_ssh_host_bind_port: 2222
 GitLab then advertises clone URLs like `ssh://git@gitlab.example.com:2222/group/project.git`.
 
 Make sure that your firewall allows incoming connections on that port.
+
+If you do not publish the port, the SSH server inside the container is not started. GitLab still shows SSH clone URLs in its web interface though, which do not work. To hide them, set **Enabled Git access protocols** to **Only HTTP(S)** in the **Admin area** under **Settings** → **General** → **Visibility and access controls**.
 
 ### Enabling the container registry (optional)
 
@@ -195,6 +188,8 @@ gitlab_config_smtp_password: YOUR_SMTP_PASSWORD_HERE
 
 gitlab_config_email_from: gitlab@example.com
 ```
+
+This connects to the SMTP server with STARTTLS (typically on port 587). If your SMTP server uses implicit TLS instead (typically on port 465), also add `gitlab_config_smtp_tls: true` (which disables STARTTLS, as the two cannot be combined).
 
 For other settings, check variables such as `gitlab_config_smtp_*` and `gitlab_config_email_*` on [`defaults/main.yml`](../defaults/main.yml).
 
@@ -320,12 +315,14 @@ Here and below, `gitlab` is the name of the container, which is set by `gitlab_i
 
 This role installs the GitLab version specified in `gitlab_version` on [`defaults/main.yml`](../defaults/main.yml). When a newer version of this role pins a newer GitLab version, GitLab upgrades itself (including its database) the next time its container is started.
 
+This role supports GitLab 19.2 and later only. To manage an existing installation of an older version with this role, upgrade it to 19.2 or later first.
+
 >[!WARNING]
 > GitLab cannot be upgraded from any version to any other version directly. Upgrades across several minor or major versions need to go through the "required upgrade stops" in between, one at a time. Refer to the [upgrade path tool](https://gitlab-com.gitlab.io/support/toolbox/upgrade-path/) and [this page](https://docs.gitlab.com/update/upgrade_paths/) to find them.
 >
-> If the upgrade path is not valid, GitLab refuses to start (its log says so), and the version needs to be set to the next required upgrade stop by setting `gitlab_version` in your `vars.yml` file, for example `gitlab_version: 19.2.7`. Before moving on to the next stop, wait for the batched background migrations of each stop to finish (see **Admin area** → **Monitoring** → **Background migrations**).
+> Before installing a new version, the role checks with GitLab's own tool whether GitLab can be upgraded to it directly. If it cannot, the role fails (and GitLab keeps running the version it runs), and the version needs to be set to the next required upgrade stop by setting `gitlab_version` in your `vars.yml` file, for example `gitlab_version: 19.2.7`. Before moving on to the next stop, wait for the batched background migrations of each stop to finish (see **Admin area** → **Monitoring** → **Background migrations**).
 
-Downgrading GitLab is not supported.
+Downgrading GitLab is not supported, and the role refuses to do it.
 
 ## Troubleshooting
 

@@ -24,6 +24,15 @@
       gitlab_edition must be 'ce' or 'ee'
   when: "gitlab_edition not in ['ce', 'ee']"
 
+# The `gitlab.rb` file this role generates uses settings which older versions do not know about.
+# For example, GitLab 19.2 moved the NGINX settings to `gitlab_rails['nginx']`: an older version would not
+# apply them, and would try to serve HTTPS itself, without a certificate.
+- name: Fail if the GitLab version is not supported
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_version (`{{ gitlab_version }}`) must be 19.2.0 or later, as this role does not support older GitLab versions.
+  when: "(gitlab_version | string) is version('19.2.0', '<')"
+
 - name: Fail if GitLab scheme is invalid
   ansible.builtin.fail:
     msg: >-
@@ -90,14 +99,6 @@
         not gitlab_database_postgres_socket_enabled and
         gitlab_database_postgres_hostname | string | length == 0
 
-- name: Fail if Redis socket host path for GitLab is missing when Unix socket is enabled
-  ansible.builtin.fail:
-    msg: >-
-      You need to define `gitlab_redis_socket_path_host` when `gitlab_redis_socket_enabled` is `true`.
-  when: >-
-    gitlab_redis_socket_enabled and
-    gitlab_redis_socket_path_host | string | length == 0
-
 - name: Run if the GitLab container registry is enabled
   when: gitlab_registry_enabled | bool
   block:
@@ -124,6 +125,14 @@
   with_items:
     - gitlab_config_smtp_address
     - gitlab_config_email_from
+
+- name: Fail if both implicit TLS and STARTTLS are enabled for SMTP
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_config_smtp_tls and gitlab_config_smtp_enable_starttls_auto must not both be `true`,
+      because GitLab fails to send any email if they are. Use gitlab_config_smtp_tls for implicit TLS (typically on port 465),
+      or gitlab_config_smtp_enable_starttls_auto for STARTTLS (typically on port 587).
+  when: "gitlab_config_smtp_enabled | bool and gitlab_config_smtp_tls | bool and gitlab_config_smtp_enable_starttls_auto | bool"
 
 - name: Run if Traefik is enabled
   when: gitlab_container_labels_traefik_enabled | bool

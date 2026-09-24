@@ -53,7 +53,7 @@ Tests a standard GitLab installation, which uses the Postgres and Redis servers 
 
 Tests a standard GitLab installation with an external Postgres database (via a Unix socket), installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres).
 
-The database password deliberately contains characters (`"`, `\` and `#`) which would break the `gitlab.rb` file (which is Ruby code) if the role did not escape them correctly.
+The database password deliberately contains characters (`"`, `\` and `#`) which would break the `gitlab.rb` file (which is Ruby code) if the role did not escape them correctly. The SSH port is deliberately not published, so that GitLab runs without its SSH server.
 
 ### `postgres-valkey`
 
@@ -68,7 +68,7 @@ The verification does not stop at "the systemd service is active" — the unit i
 - signs in as `root` with the password the role writes into `gitlab.rb` (`gitlab_config_initial_root_password`). A GitLab running on anything but the role's configuration generates a random password instead
 - asserts that the running GitLab reports the version `gitlab_version` pins and the expected edition, via `/api/v4/version`
 - asserts that the bundled Postgres and Redis servers run inside the container if and only if the scenario asks for them, which proves that the database and Redis settings reached GitLab
-- asserts that GitLab's SSH server answers on the published port, and (if enabled) that the container registry answers on its own
+- asserts that GitLab's SSH server runs and answers on the published port if and only if one is published, and (if enabled) that the container registry answers on its own
 - asserts that no Traefik labels are emitted while Traefik is disabled, and that `gitlab.rb` (which contains secrets) is only readable by `root`
 - watches the services for 45 seconds to make sure none of them is quietly restarting
 
