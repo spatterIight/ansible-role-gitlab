@@ -47,33 +47,33 @@ Currently these testing scenarios are available:
 
 ### `default`
 
-Tests a standard GitLab installation with the role's default configuration, which uses the Postgres and Redis servers bundled in the GitLab container image.
+Uses the role's defaults: the Postgres and Redis servers bundled in the GitLab container image.
 
 ### `postgres`
 
-Tests a standard GitLab installation with an external Postgres database (via a Unix socket), installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres).
+Uses an external Postgres server (via a Unix socket), installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres).
 
-The database password deliberately contains characters (`"`, `\` and `#`) which would break the `gitlab.rb` file (which is Ruby code) if the role did not escape them correctly. The SSH port is deliberately not published, so that GitLab runs without its SSH server.
+The database password contains characters (`"`, `\` and `#`) which break `gitlab.rb` (Ruby code) unless the role escapes them. The SSH port is not published, so GitLab runs without its SSH server.
 
 ### `postgres-valkey`
 
-Tests a standard GitLab installation with an external Postgres database (via a Unix socket) and an external Valkey data-store (via TCP), installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres) and [ansible-role-valkey](https://github.com/mother-of-all-self-hosting/ansible-role-valkey). It also enables the container registry.
+Uses an external Postgres server (via a Unix socket) and an external Valkey server (via TCP), installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres) and [ansible-role-valkey](https://github.com/mother-of-all-self-hosting/ansible-role-valkey), and enables the container registry.
 
 ### What is verified
 
-The verification does not stop at "the systemd service is active" — the unit is `Restart=always`, so a crash-looping container reports `active` too. It:
+The systemd service is `Restart=always`, so it reports `active` even while the container crash-loops. The verification therefore:
 
-- waits for GitLab's sign-in page rather than for the unit, since on its first start GitLab needs minutes to set up its database before any of its web services come up, and then for GitLab to finish reconfiguring itself, as its last steps can restart services after the sign-in page already responds
-- establishes that the API refuses unauthenticated requests and that a wrong password is rejected, so that the two checks below are able to fail in the first place
-- signs in as `root` with the password the role writes into `gitlab.rb` (`gitlab_config_initial_root_password`). A GitLab running on anything but the role's configuration generates a random password instead
-- asserts that the running GitLab reports the version `gitlab_version` pins and the expected edition, via `/api/v4/version`
-- asserts that the bundled Postgres and Redis servers run inside the container if and only if the scenario asks for them, which proves that the database and Redis settings reached GitLab
-- asserts that GitLab's SSH server runs and answers on the published port if and only if one is published, and (if enabled) that the container registry answers on its own
-- creates a backup with GitLab's own backup tool (`gitlab-backup create`). With an external Postgres server, this proves that `gitlab_database_postgres_version` selects a `pg_dump` client which matches the server, as a mismatched one refuses to dump it
-- asserts that `gitlab-rake gitlab:background_migrations:status`, which the role runs (and parses) before upgrading GitLab to a new minor or major version, works and still prints what the role looks for
-- with an external Postgres server, asserts that the `amcheck` extension (which GitLab requires, and only a superuser may create) exists
-- asserts that no Traefik labels are emitted while Traefik is disabled, and that `gitlab.rb` (which contains secrets) is only readable by `root`
-- watches the services for 45 seconds to make sure none of them is quietly restarting
+- waits for GitLab's sign-in page, and then for GitLab to finish reconfiguring itself, whose last steps can restart services
+- checks that the API refuses unauthenticated requests and that a wrong password is rejected, so that the checks below can fail
+- signs in as `root` with `gitlab_config_initial_root_password`, which only works if GitLab runs on the role's configuration
+- checks that GitLab reports the version pinned by `gitlab_version` and the expected edition (`/api/v4/version`)
+- checks that the bundled Postgres and Redis servers run if and only if the scenario uses them
+- checks that GitLab's SSH server runs and answers if and only if its port is published, and that the container registry answers if enabled
+- creates a backup with `gitlab-backup create`, which (with an external Postgres server) proves that `gitlab_database_postgres_version` selects a matching `pg_dump` client
+- checks that `gitlab-rake gitlab:background_migrations:status`, which the role parses before an upgrade, still prints what the role looks for
+- with an external Postgres server, checks that the `amcheck` extension exists
+- checks that no Traefik labels are emitted while Traefik is disabled, and that `gitlab.rb` (which contains secrets) is only readable by `root`
+- watches the services for 45 seconds to make sure none of them is restarting
 
 ## Running
 
@@ -96,7 +96,7 @@ MOLECULE_DISTRO=debian13 molecule test --scenario-name default
 MOLECULE_DISTRO=debian12 molecule test --scenario-name default
 ```
 
-The GitLab container image is large (about 1.5 GB to download, 5.5 GB unpacked), and it is pulled from Docker Hub by the Docker daemon inside the test container. If Docker Hub rate-limits you, you can have that daemon use a registry mirror by setting the `MOLECULE_DOCKER_REGISTRY_MIRROR` environment variable:
+The GitLab container image is large (about 1.5 GB to download, 5.5 GB unpacked). If Docker Hub rate-limits you, set `MOLECULE_DOCKER_REGISTRY_MIRROR` to have the Docker daemon inside the test container use a registry mirror:
 
 ```bash
 MOLECULE_DOCKER_REGISTRY_MIRROR=https://mirror.gcr.io molecule test --scenario-name default

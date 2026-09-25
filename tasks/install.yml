@@ -13,10 +13,8 @@
     owner: "{{ gitlab_uid }}"
     group: "{{ gitlab_gid }}"
 
-# The contents of these directories are managed by GitLab itself, which runs as `root` in the container
-# and hands parts of them over to the various users its services run as.
-# The ownership and modes below are the ones GitLab sets on these directories itself,
-# so that this role and GitLab do not keep changing them back and forth.
+# GitLab manages the contents of these directories itself. The ownership and modes below are the ones
+# GitLab sets on them, so that this role and GitLab do not keep changing them back and forth.
 - name: Ensure GitLab data paths exist
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -49,13 +47,12 @@
   until: gitlab_container_image_pull_result_command is not failed
   changed_when: "'Downloaded newer image' in gitlab_container_image_pull_result_command.stdout"
 
-# When it's started, GitLab checks whether it can be upgraded directly from the version it was running before,
-# and refuses to start if it cannot (e.g. when a required upgrade stop was skipped). As the systemd service
-# restarts it, GitLab would then remain down, trying to start over and over.
+# GitLab refuses to start if it cannot be upgraded directly from the version it ran before (e.g. when a required
+# upgrade stop was skipped), and would then stay down, restarting over and over.
 #
-# The same check is done here instead, with GitLab's own tool from the new container image, before anything
-# on the host is pointed to that image (the configuration included, as the old container would otherwise apply
-# it the next time it restarts). This way, the playbook run fails with an explanation, and GitLab stays up.
+# The same check runs here, with the new container image's own tool, before anything on the host points to that image
+# (including the configuration, which the old container would apply on its next restart). This way, the playbook run
+# fails with an explanation, and GitLab stays up.
 - name: Check whether GitLab can be upgraded to the configured version
   when: gitlab_upgrade_check_enabled | bool
   block:
@@ -122,9 +119,8 @@
           GitLab says: {{ (gitlab_upgrade_check_result.stderr_lines + gitlab_upgrade_check_result.stdout_lines) | join(' ') }}
       when: "gitlab_upgrade_check_result.rc | default(0) != 0"
 
-    # The database migrations of a new minor or major version may depend on the batched background migrations
-    # queued by the versions before it, and fail if these have not finished yet. As GitLab reconfigures itself
-    # (and runs its database migrations) on start, it would then remain down, trying to start over and over.
+    # The database migrations of a new minor or major version may depend on unfinished batched background migrations.
+    # They would then fail on start, and GitLab would stay down, restarting over and over.
     - name: Check whether GitLab's batched background migrations have finished
       when:
         - gitlab_upgrade_check_background_migrations_enabled | bool

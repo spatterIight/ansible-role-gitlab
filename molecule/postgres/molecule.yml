@@ -19,8 +19,7 @@ platforms:
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     cgroupns_mode: host
-    # Also what gives the inner Docker a /dev/fuse to hand to fuse-overlayfs.
-    # See prepare.yml for why that storage driver is not the fleet's usual vfs.
+    # Also gives the inner Docker the /dev/fuse which fuse-overlayfs needs (see prepare.yml).
     privileged: true
     pre_build_image: true
 provisioner:
@@ -42,16 +41,14 @@ provisioner:
         gitlab_hostname: localhost
         gitlab_container_labels_traefik_enabled: false
         gitlab_container_http_host_bind_port: 8080
-        # Deliberately not publishing the SSH port, so that this scenario tests that GitLab works
-        # without its SSH server (and the capabilities it needs), which the role then does not start.
+        # The SSH port is not published, to test GitLab without its SSH server (which the role then does not start).
         gitlab_config_initial_root_password: Molecule-Test-Pass-9471
 
         # Variables required for GitLab to connect to the Postgres database (via Unix socket)
         gitlab_database_type: postgres
         gitlab_database_postgres_username: my_database_username
-        # Deliberately contains characters which need escaping in `gitlab.rb` (a Ruby file),
-        # so that a mistake there fails the database connection rather than going unnoticed.
-        # (Sequences like `#{` are not used, as GitLab itself cannot handle them. See `tasks/validate_config.yml`.)
+        # Contains characters which need escaping in `gitlab.rb` (Ruby), so that an escaping mistake fails
+        # the database connection. (`#{` is not used, as GitLab cannot handle it. See `tasks/validate_config.yml`.)
         gitlab_database_postgres_password: "my_database\"pass#word\\"
         gitlab_database_name: gitlab
         gitlab_database_postgres_socket_enabled: true
@@ -66,8 +63,7 @@ provisioner:
         postgres_gid: 1000
         postgres_connection_password: postgres_password
         postgres_container_unix_socket_enabled: true
-        # GitLab requires the `amcheck` extension, which (unlike the other extensions it requires)
-        # only a superuser may create. See docs/configuring-gitlab.md.
+        # GitLab requires the `amcheck` extension, which only a superuser may create. See docs/configuring-gitlab.md.
         postgres_managed_databases:
           - name: "{{ gitlab_database_name }}"
             username: "{{ gitlab_database_postgres_username }}"

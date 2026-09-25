@@ -73,8 +73,7 @@
     - "{{ gitlab_data_path }}"
 
 # We just want to notify the user. Deleting data is too destructive.
-# The configuration path is kept as well, because it contains GitLab's secrets (`gitlab-secrets.json`),
-# without which the encrypted data in the database cannot be read anymore.
+# This includes the configuration path, which holds GitLab's secrets (`gitlab-secrets.json`).
 - name: Inject the message about the remaining GitLab local data paths
   when: gitlab_data_paths_stat.results | selectattr('stat.exists') | list | length > 0
   ansible.builtin.set_fact:

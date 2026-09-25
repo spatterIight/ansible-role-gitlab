@@ -19,8 +19,7 @@ platforms:
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     cgroupns_mode: host
-    # Also what gives the inner Docker a /dev/fuse to hand to fuse-overlayfs.
-    # See prepare.yml for why that storage driver is not the fleet's usual vfs.
+    # Also gives the inner Docker the /dev/fuse which fuse-overlayfs needs (see prepare.yml).
     privileged: true
     pre_build_image: true
 provisioner:

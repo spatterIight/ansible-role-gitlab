@@ -20,10 +20,8 @@
         name:
           # Used by the `ansible.builtin.uri` calls in verify.yml
           - python3-requests
-          # The storage driver Docker is configured with below. `overlay2` cannot be nested inside
-          # the container Molecule runs these tests in, and `vfs` (the usual fallback) has no
-          # copy-on-write, so it writes out every layer of the image in full. GitLab's image
-          # unpacks to ~5.5 GB, which makes that difference expensive.
+          # The storage driver configured below. `overlay2` cannot be nested in Molecule's container,
+          # and `vfs` has no copy-on-write, which is expensive with GitLab's ~5.5 GB image.
           - fuse-overlayfs
         state: present
 

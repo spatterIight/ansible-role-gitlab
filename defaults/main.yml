@@ -18,8 +18,7 @@ gitlab_identifier: gitlab
 gitlab_base_path: "/{{ gitlab_identifier }}"
 
 # Mounted to `/etc/gitlab` in the container.
-# Besides the `gitlab.rb` file managed by this role, GitLab stores its own secrets here
-# (`gitlab-secrets.json`, the SSH host keys, etc.), so this directory needs to be backed up.
+# Also holds GitLab's secrets (`gitlab-secrets.json`, the SSH host keys, etc.), so it needs to be backed up.
 gitlab_config_path: "{{ gitlab_base_path }}/config"
 
 # Mounted to `/var/log/gitlab` in the container.
@@ -29,10 +28,7 @@ gitlab_logs_path: "{{ gitlab_base_path }}/logs"
 # This holds the Git repositories, uploads, and (if `gitlab_database_type: bundled`) the database.
 gitlab_data_path: "{{ gitlab_base_path }}/data"
 
-# The GitLab version to install.
-#
-# This role supports GitLab 19.2 and later only, as the `gitlab.rb` file it generates uses settings
-# which older versions do not know about (see `tasks/validate_config.yml`).
+# The GitLab version to install. GitLab 19.2 and later are supported (see `tasks/validate_config.yml`).
 # renovate: datasource=docker depName=gitlab/gitlab-ce versioning=semver
 gitlab_version: 19.4.1
 
@@ -40,16 +36,14 @@ gitlab_version: 19.4.1
 # Valid values: ce (Community Edition), ee (Enterprise Edition)
 #
 # Without a license, the Enterprise Edition behaves like the Community Edition,
-# but it allows for upgrading to a paid tier later on without migrating.
+# but allows upgrading to a paid tier without migrating.
 # See: https://about.gitlab.com/install/ce-or-ee/
 gitlab_edition: ce
 
-# Used as the owner of the files this role manages on the host (e.g. the `env` and `labels` files).
+# The owner of the files this role manages on the host (e.g. the `env` and `labels` files).
 #
-# Note: GitLab's Omnibus container needs to run as `root` (it starts and supervises multiple services,
-# each as its own dedicated user), and the users it uses internally cannot be remapped.
-# The contents of `gitlab_config_path`, `gitlab_logs_path` and `gitlab_data_path` are therefore
-# owned by `root` and other users defined in the container image, not by these.
+# GitLab's container runs as `root` and uses its own internal users, so the contents of
+# `gitlab_config_path`, `gitlab_logs_path` and `gitlab_data_path` are not owned by these.
 gitlab_uid: ""
 gitlab_gid: ""
 
@@ -64,9 +58,7 @@ gitlab_hostname: ""
 gitlab_path_prefix: /
 
 # The scheme (`http` or `https`) at which GitLab is served.
-#
-# This role assumes that TLS is terminated by a reverse-proxy in front of GitLab (e.g. Traefik),
-# so this only affects the URLs GitLab generates, not what it listens on.
+# TLS is terminated by a reverse-proxy (e.g. Traefik), so this only affects the URLs GitLab generates.
 gitlab_scheme: https
 
 gitlab_container_image: "{{ gitlab_container_image_registry_prefix }}gitlab/gitlab-{{ gitlab_edition }}:{{ gitlab_container_image_tag }}"
@@ -90,19 +82,14 @@ gitlab_container_http_port: 80
 gitlab_container_http_host_bind_port: ""
 
 # Specify how the container publishes its SSH port (tcp/22 in the container), used for Git over SSH.
+# GitLab advertises this port in its SSH clone URLs (see `gitlab_config_gitlab_shell_ssh_port`).
 #
 # Takes an "<ip>:<port>" or "<port>" value (e.g. "2222"), or empty string to not expose.
-#
-# Note: port 22 on the host is usually taken by the host's own SSH server, so another port (e.g. `2222`) is typically used.
-# The port specified here is also advertised by GitLab in the SSH clone URLs (see `gitlab_config_gitlab_shell_ssh_port`).
 gitlab_container_ssh_host_bind_port: ""
 
-# Controls whether the SSH server inside the container (used for Git over SSH) runs.
-#
-# By default, it only runs if its port is published (see `gitlab_container_ssh_host_bind_port`),
-# as there is no other way to reach it. If you make it reachable in another way
-# (e.g. via a Traefik TCP router, defined with `gitlab_container_labels_additional_labels_custom`), set this to `true`,
-# and set `gitlab_config_gitlab_shell_ssh_port` to the port which clients connect to, as GitLab would advertise port 22 otherwise.
+# Controls whether the SSH server inside the container runs. By default, it only runs if its port is published.
+# If it's reachable in another way (e.g. via a Traefik TCP router), set this to `true`,
+# and set `gitlab_config_gitlab_shell_ssh_port` to the port which clients connect to.
 gitlab_ssh_enabled: "{{ gitlab_container_ssh_host_bind_port | string | length > 0 }}"
 
 # The port number that the container registry is served on (via HTTP) inside the container.
@@ -194,8 +181,7 @@ gitlab_container_labels_additional_labels: "{{ gitlab_container_labels_additiona
 gitlab_container_labels_additional_labels_auto: []
 gitlab_container_labels_additional_labels_custom: []
 
-# Specify the size of the container's shared memory (`/dev/shm`).
-# GitLab recommends at least 256 MB, as some of its components (e.g. the Prometheus metrics used by Puma and Sidekiq) store data there.
+# Specify the size of the container's shared memory (`/dev/shm`). GitLab recommends at least 256 MB.
 # See: https://docs.gitlab.com/install/docker/troubleshooting/#devshm-mount-not-having-enough-space-in-docker-container
 gitlab_container_shm_size: 256m
 
@@ -209,10 +195,8 @@ gitlab_container_extra_arguments_custom: []
 # See: https://github.com/mother-of-all-self-hosting/mash-playbook/issues/391
 gitlab_container_hostname: ""
 
-# Controls whether the container prints the logs of all of GitLab's services (via `gitlab-ctl tail`),
-# so that they end up in the systemd journal.
-#
-# Regardless of this, the logs are also written to files in `gitlab_logs_path`.
+# Controls whether the logs of all of GitLab's services (`gitlab-ctl tail`) end up in the systemd journal.
+# They are written to `gitlab_logs_path` regardless.
 gitlab_container_logs_tail_enabled: true
 
 # Specifies the value of the `X-XSS-Protection` header
@@ -279,27 +263,19 @@ gitlab_systemd_wanted_services_list_default: []
 gitlab_systemd_wanted_services_list_auto: []
 gitlab_systemd_wanted_services_list_custom: []
 
-# Controls whether the role checks, before installing a new GitLab version, that GitLab can be upgraded
-# to it directly from the version it currently runs (i.e. without skipping a required upgrade stop),
-# that it's not being downgraded, and that it's not being switched from the Enterprise Edition
-# to the Community Edition (which needs manual preparation). See `../tasks/install.yml` for details.
+# Controls whether the role checks, before installing a new GitLab version, that it does not skip a required
+# upgrade stop, downgrade GitLab, or switch it from the Enterprise to the Community Edition. See `../tasks/install.yml`.
 gitlab_upgrade_check_enabled: true
 
-# Controls whether the role checks, before upgrading GitLab to a new minor or major version,
-# that all of its batched background migrations have finished. GitLab requires this before an upgrade:
-# the database migrations of the new version may depend on them, and fail (leaving GitLab down) if they have not finished.
-#
-# The check asks the running GitLab container, so it's skipped if the container is not running.
-# It only applies if `gitlab_upgrade_check_enabled` is enabled.
+# Controls whether the role checks, before an upgrade to a new minor or major version, that GitLab's batched
+# background migrations have finished, as the new version's database migrations may depend on them.
+# Skipped if the container is not running, or if `gitlab_upgrade_check_enabled` is disabled.
 # See: https://docs.gitlab.com/update/background_migrations/
 gitlab_upgrade_check_background_migrations_enabled: true
 
 # Controls how long to wait for the container to stop gracefully before killing it.
-#
-# Unlike most services, GitLab runs a whole fleet of processes (Puma, Sidekiq, Gitaly, nginx, and possibly PostgreSQL and Redis)
-# which it shuts down one by one via `gitlab-ctl stop`. This takes around 20 seconds, so the few seconds that
-# `devture_systemd_docker_base_container_stop_grace_time_seconds` usually provides are not enough.
-# Killing the container before it's done may leave its bundled database (if used) in need of crash-recovery.
+# GitLab stops its services one by one, which takes around 20 seconds.
+# Killing it earlier may leave the bundled database (if used) in need of crash-recovery.
 gitlab_container_stop_grace_time_seconds: 60
 
 # Controls how long the pre-start cleanup should wait for stale container-name release
@@ -338,11 +314,9 @@ gitlab_container_cleanup_command: |
 
 # Specify which database GitLab uses.
 # Valid values:
-# - bundled: the PostgreSQL server bundled in the GitLab container image, which stores its data in `gitlab_data_path`
-# - postgres: an external Postgres server (e.g. one managed by https://github.com/mother-of-all-self-hosting/ansible-role-postgres)
-#
-# Note: GitLab requires a specific range of Postgres versions, and its schema needs more locks than
-# a Postgres server with default settings may provide. See `docs/configuring-gitlab.md` for details.
+# - bundled: the Postgres server bundled in the GitLab container image, which stores its data in `gitlab_data_path`
+# - postgres: an external Postgres server (e.g. one managed by https://github.com/mother-of-all-self-hosting/ansible-role-postgres).
+#   See `docs/configuring-gitlab.md` for its requirements.
 gitlab_database_type: bundled
 
 # Specify database configuration
@@ -352,14 +326,11 @@ gitlab_database_postgres_username: gitlab
 gitlab_database_postgres_password: ""
 gitlab_database_name: gitlab
 
-# The major version of the Postgres server (only relevant if `gitlab_database_type` is `postgres`).
+# The major version of the external Postgres server (only relevant if `gitlab_database_type` is `postgres`).
 #
-# GitLab's backup tool (`gitlab-backup`) dumps and restores the database with the `pg_dump` and `psql`
-# clients bundled in the container image. `pg_dump` refuses to dump a server of a newer major version than its own,
-# which makes every backup fail.
-# This controls `postgresql['version']`, which selects the bundled clients of this major version
-# (GitLab 19.3 and later bundle versions 17 and 18). If left empty, the image's default version is used (17 for GitLab 19).
-#
+# Controls `postgresql['version']`, which selects the bundled `pg_dump` and `psql` clients `gitlab-backup` uses.
+# `pg_dump` cannot dump a server of a newer major version, so this needs to match the server.
+# If left empty, the image's default version is used (17 for GitLab 19).
 # The default matches the Postgres version that ansible-role-postgres installs.
 # See: https://docs.gitlab.com/omnibus/settings/database/#upgrade-a-non-packaged-postgresql-database
 gitlab_database_postgres_version: 18
@@ -394,13 +365,11 @@ gitlab_config_db_host: "{{ gitlab_database_postgres_socket_path_container if git
 #                                                                      #
 ########################################################################
 
-# By default, GitLab uses the Redis server which is bundled in its container image.
-# It can be configured to use an external Redis-compatible server (e.g. Valkey,
-# managed by https://github.com/mother-of-all-self-hosting/ansible-role-valkey) by specifying `gitlab_redis_hostname`.
+# By default, GitLab uses the Redis server bundled in its container image.
+# To use an external Redis-compatible server (e.g. Valkey) instead, set `gitlab_redis_hostname`.
 #
-# Connecting via a Unix socket is intentionally not supported: GitLab's services run as users which only exist
-# inside its container (e.g. `git`), which cannot access the socket directories of other containers
-# (e.g. the one of ansible-role-valkey, which is only accessible to its own user).
+# Unix sockets are not supported: GitLab's services run as users internal to its container,
+# which cannot access the socket directories of other containers.
 gitlab_redis_hostname: ""
 gitlab_redis_password: ""
 gitlab_redis_port: 6379
@@ -448,14 +417,12 @@ gitlab_config_registry_external_url: "{{ gitlab_scheme }}://{{ gitlab_registry_h
 gitlab_config_external_url: "{{ gitlab_scheme }}://{{ gitlab_hostname }}{{ gitlab_path_prefix if gitlab_path_prefix != '/' else '' }}"
 
 # gitlab_config_trusted_proxies controls `gitlab_rails['trusted_proxies']` and `gitlab_rails['nginx']['real_ip_trusted_addresses']`,
-# which lets GitLab see the real IP address of clients connecting via a reverse-proxy (e.g. Traefik).
+# which lets GitLab see the real IP address of clients behind a reverse-proxy (e.g. Traefik).
 #
-# By default, all private IP address ranges are trusted, because container networks (and therefore a reverse-proxy
-# running in a container) may use any of them. Anything connecting from a trusted address can claim to be any client
-# via the `X-Forwarded-For` header, which GitLab then uses for its rate limits, logs and IP address restrictions.
-#
-# If you publish GitLab's HTTP port (`gitlab_container_http_host_bind_port`) where clients from a private network
-# (e.g. your LAN) can connect to it directly, narrow this down to the address(es) of your reverse-proxy.
+# All private IP address ranges are trusted by default, as container networks may use any of them.
+# Anything connecting from a trusted address can claim to be any client (via `X-Forwarded-For`), so if you publish
+# GitLab's HTTP port (`gitlab_container_http_host_bind_port`) to a private network (e.g. your LAN),
+# narrow this down to the address(es) of your reverse-proxy.
 gitlab_config_trusted_proxies:
   - 10.0.0.0/8
   - 172.16.0.0/12
@@ -466,20 +433,15 @@ gitlab_config_trusted_proxies:
 gitlab_config_gitlab_ssh_host: "{{ gitlab_hostname }}"
 
 # gitlab_config_gitlab_shell_ssh_port controls `gitlab_rails['gitlab_shell_ssh_port']`, the port advertised in SSH clone URLs.
-# By default, it's derived from `gitlab_container_ssh_host_bind_port`, and is 22 if that's not set.
-#
-# If the SSH server is reachable in another way (e.g. via a Traefik TCP router, see `gitlab_ssh_enabled`),
-# set this to the port which clients connect to.
+# It's derived from `gitlab_container_ssh_host_bind_port` (22 if that's not set).
+# If the SSH server is reachable in another way (see `gitlab_ssh_enabled`), set this to the port which clients connect to.
 gitlab_config_gitlab_shell_ssh_port: "{{ (gitlab_container_ssh_host_bind_port | string).split(':') | last if gitlab_container_ssh_host_bind_port | string | length > 0 else 22 }}"
 
 # gitlab_config_initial_root_password controls `gitlab_rails['initial_root_password']`,
-# the password of the `root` user which GitLab creates when it's started for the first time.
-#
-# Changing it after the initial installation has no effect.
+# the password of the `root` user which GitLab creates on its first start. Changing it afterwards has no effect.
 # If left empty, GitLab generates a random password and stores it in `gitlab_config_path`/initial_root_password for 24 hours.
 #
-# As long as this is set, the password remains in `gitlab.rb` in plain text. Once GitLab has created the `root` user,
-# it can be unset again, which removes it from there (and restarts GitLab on the next run of the role).
+# While set, the password is stored in `gitlab.rb` in plain text, so unset it once the `root` user exists.
 # See: https://docs.gitlab.com/security/reset_user_password/
 gitlab_config_initial_root_password: ""
 
@@ -494,7 +456,7 @@ gitlab_config_usage_ping_enabled: false
 # gitlab_config_prometheus_monitoring_enabled controls `prometheus_monitoring['enable']`,
 # which controls whether the bundled Prometheus monitoring stack (Prometheus, Alertmanager and the exporters) runs.
 #
-# It's disabled by default, because it considerably increases the memory usage.
+# It's disabled by default, as it considerably increases memory usage.
 # See: https://docs.gitlab.com/administration/monitoring/prometheus/
 gitlab_config_prometheus_monitoring_enabled: false
 
@@ -512,16 +474,14 @@ gitlab_config_sidekiq_concurrency: ""
 # gitlab_config_email_* control the sender of emails sent by GitLab.
 # See: https://docs.gitlab.com/omnibus/settings/smtp/
 #
-# gitlab_config_email_enabled controls `gitlab_rails['gitlab_email_enabled']`, which controls whether GitLab sends emails at all.
-# GitLab can only send them via SMTP (see `gitlab_config_smtp_enabled`): without it, it would try to use `sendmail`,
-# which is not available in the container, and every email would fail. It's therefore only enabled together with SMTP.
+# gitlab_config_email_enabled controls `gitlab_rails['gitlab_email_enabled']`, i.e. whether GitLab sends emails at all.
+# The container has no `sendmail`, so GitLab can only send emails via SMTP, and this is only enabled together with it.
 gitlab_config_email_enabled: "{{ gitlab_config_smtp_enabled }}"
 gitlab_config_email_from: ""
 gitlab_config_email_display_name: GitLab
 gitlab_config_email_reply_to: ""
 
 # gitlab_config_smtp_* control how GitLab sends emails via SMTP.
-# If SMTP is not enabled, GitLab does not send any emails (see `gitlab_config_email_enabled`).
 # See: https://docs.gitlab.com/omnibus/settings/smtp/
 gitlab_config_smtp_enabled: false
 gitlab_config_smtp_address: ""
@@ -533,22 +493,19 @@ gitlab_config_smtp_domain: "{{ gitlab_hostname }}"
 gitlab_config_smtp_authentication: login
 # Set to `true` for implicit TLS (typically on port 465).
 gitlab_config_smtp_tls: false
-# Controls whether the connection is upgraded to TLS via STARTTLS (typically on port 587).
-# Implicit TLS and STARTTLS are mutually exclusive (GitLab fails to send any email if both are enabled),
-# so this is disabled automatically when `gitlab_config_smtp_tls` is enabled.
+# Controls whether to use STARTTLS (typically on port 587).
+# Disabled with `gitlab_config_smtp_tls`, as GitLab fails to send any email if both are enabled.
 gitlab_config_smtp_enable_starttls_auto: "{{ not gitlab_config_smtp_tls | bool }}"
 # Valid values: none, peer
 gitlab_config_smtp_openssl_verify_mode: peer
 
-# gitlab_config_backup_keep_time controls `gitlab_rails['backup_keep_time']`, the number of seconds for which
-# backups created by `gitlab-backup create` are kept in the `backups` directory in `gitlab_data_path`.
+# gitlab_config_backup_keep_time controls `gitlab_rails['backup_keep_time']`, the number of seconds to keep backups for.
 # Older ones are deleted whenever a new backup is created. Set to `0` to keep all of them.
 # See: https://docs.gitlab.com/administration/backup_restore/backup_gitlab/#limit-backup-lifetime-for-local-files-prune-old-backups
 gitlab_config_backup_keep_time: 604800
 
 # gitlab_configuration_extension_rb contains a multiline string with additional configuration (in Ruby)
-# which is appended to the end of `/etc/gitlab/gitlab.rb`.
-# Since it's appended last, it can also override any setting that this role configures.
+# which is appended to `/etc/gitlab/gitlab.rb`, and can therefore override any setting this role configures.
 #
 # Example:
 # gitlab_configuration_extension_rb: |
