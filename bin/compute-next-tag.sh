@@ -38,6 +38,8 @@ role_defining_paths=(
 	'templates'
 )
 
+# Anchored on `gitlab_version:` so that neither the `# renovate:` annotation above
+# it nor `gitlab_container_image_tag`, which is derived from it, can be mistaken for it.
 version="$(sed -nE 's|^gitlab_version:[[:space:]]*"?([^"[:space:]]+)"?.*$|\1|p' "$defaults_path" | head -n1)"
 
 if [ -z "$version" ]; then

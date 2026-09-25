@@ -66,14 +66,15 @@ provisioner:
         postgres_gid: 1000
         postgres_connection_password: postgres_password
         postgres_container_unix_socket_enabled: true
-        postgres_managed_databases: |
-          {{
-            [{
-              'name': gitlab_database_name,
-              'username': gitlab_database_postgres_username,
-              'password': gitlab_database_postgres_password,
-            }]
-          }}
+        # GitLab requires the `amcheck` extension, which (unlike the other extensions it requires)
+        # only a superuser may create. See docs/configuring-gitlab.md.
+        postgres_managed_databases:
+          - name: "{{ gitlab_database_name }}"
+            username: "{{ gitlab_database_postgres_username }}"
+            password: "{{ gitlab_database_postgres_password }}"
+            additional_sql_queries:
+              - '\c {{ gitlab_database_name }}'
+              - CREATE EXTENSION IF NOT EXISTS amcheck;
   env:
     # Workaround for https://github.com/ansible/molecule/issues/4391
     ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles

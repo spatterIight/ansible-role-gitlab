@@ -81,6 +81,13 @@
           Please choose another password.
       when: gitlab_database_postgres_password is search('#[{$@]')
 
+    - name: Fail if the Postgres version for GitLab is invalid
+      ansible.builtin.fail:
+        msg: >-
+          gitlab_database_postgres_version (`{{ gitlab_database_postgres_version }}`) must either be empty
+          or the major version of the Postgres server (e.g. `18`).
+      when: "(gitlab_database_postgres_version | string) is not match('^([0-9]+)?$')"
+
     - name: Fail if Postgres socket host path for GitLab is missing when Unix socket is enabled
       ansible.builtin.fail:
         msg: >-

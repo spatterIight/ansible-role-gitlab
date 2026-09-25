@@ -21,6 +21,8 @@ Check [defaults/main.yml](defaults/main.yml) for the full list of supported opti
 
 💡 See this [document](docs/configuring-gitlab.md) for details about setting up the service with this role.
 
+💡 See this [document](docs/updating-gitlab.md) for the procedure to update this role for a new GitLab release.
+
 ## Development
 
 ### pre-commit
