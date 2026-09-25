@@ -24,9 +24,8 @@ Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
 ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_container_cleanup_command | trim | replace("\n", " ") }}'
 
 {#
-  Unlike most services, the GitLab Omnibus container cannot run with `--user` or `--read-only`:
-  it runs `gitlab-ctl reconfigure` on every start (which writes to the filesystem and fixes up ownership),
-  and then supervises multiple services (Puma, Sidekiq, Gitaly, nginx, sshd, etc.), each as its own dedicated user.
+  The container cannot run with `--user` or `--read-only`: it reconfigures itself on every start (writing to
+  the filesystem and fixing up ownership), and runs each of its services as its own user.
 
   Instead, all capabilities are dropped except for the ones needed to do that:
   - CHOWN, DAC_OVERRIDE, FOWNER, FSETID: for managing the ownership and permissions of files
@@ -35,12 +34,9 @@ ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_con
   - NET_BIND_SERVICE: for nginx and sshd to listen on privileged ports
   - SYS_CHROOT, AUDIT_WRITE: for sshd (Git over SSH), so only if it runs (see `gitlab_ssh_enabled`)
 
-  The health check parameters were changed, because Traefik does not reverse-proxy to a container which is `unhealthy`:
-  - by default (as defined in the container image), the check only runs every 60 seconds, so it would take
-    minutes to notice that GitLab stopped responding, and up to a minute to notice that it's responding again
-  - the check always passes until GitLab has written its configuration (partway through starting), and fails after
-    that until GitLab is ready. As starting takes minutes (longer when migrating the database after an upgrade),
-    the more frequent checks could mark the container `unhealthy` while it's still starting. The start period prevents that.
+  Traefik does not route to an `unhealthy` container, so the health check runs more often than the image's
+  default (every 60 seconds). As GitLab takes minutes to start (longer when migrating its database),
+  the start period keeps it from being marked `unhealthy` while starting.
 #}
 ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
       --rm \

@@ -1,8 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Patch-level bumps of GitLab automerge here once CI is green: they never cross a required upgrade stop, and GitLab ships its security fixes as patch releases (usually twice a month). The Molecule scenarios install the new version, sign in with the credentials the role configures, and assert that GitLab reports the version defaults/main.yml pins.",
-    "Minor and major bumps stay human-reviewed pull requests, as they may cross a required upgrade stop, change the settings gitlab.rb supports, or change GitLab's requirements - see docs/updating-gitlab.md."
+    "Patch releases of GitLab are automerged once CI is green, as they never cross a required upgrade stop.",
+    "Minor and major releases need a human review - see docs/updating-gitlab.md."
   ],
   "extends": [
     "github>mother-of-all-self-hosting/renovate-config#v1.1.0",
@@ -16,7 +16,7 @@
       "extractVersion": "^(?<version>\\d+\\.\\d+\\.\\d+)-ce\\.0$"
     },
     {
-      "description": "GitLab can only be upgraded through its required upgrade stops (e.g. 19.2, 19.5, 19.8 and 19.11), one at a time. Without this, a repository that has fallen behind would be offered a single pull request jumping straight to the newest minor, skipping the stops in between. One pull request (and therefore one release of this role) per minor keeps the upgrade path walkable.",
+      "description": "GitLab can only be upgraded through its required upgrade stops (e.g. 19.2, 19.5, 19.8 and 19.11). One pull request (and therefore one release of this role) per minor version keeps the role's releases from skipping them.",
       "matchManagers": ["custom.regex"],
       "separateMultipleMinor": true
     }

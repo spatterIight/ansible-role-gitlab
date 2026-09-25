@@ -4,9 +4,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 ---
-# The role is not included in this playbook, so its defaults are not in
-# scope. Reading defaults/main.yml directly ties the version assertion
-# below to what the role pins.
+# The role is not included in this playbook, so its defaults are read directly
+# (e.g. for the version the role pins).
 - name: Load the role defaults
   ansible.builtin.include_vars:
     file: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yml"
@@ -24,9 +23,8 @@
   # wall of systemd unit properties.
   failed_when: false
 
-# `Restart=always` in the systemd unit means that even a container which crashes
-# and gets restarted reads as active here, so this is a precondition rather than
-# a result.
+# The unit is `Restart=always`, so even a crash-looping container reads as active here.
+# This is a precondition, not a result.
 - name: Assert the GitLab systemd services are active
   ansible.builtin.assert:
     that: gitlab_services.results | map(attribute='status.ActiveState') | unique | list == ['active']
@@ -42,9 +40,8 @@
   changed_when: false
   loop: "{{ gitlab_verify_units }}"
 
-# On its first start, GitLab runs `gitlab-ctl reconfigure`, loads its database schema and seeds it,
-# before any of its web services come up. Until then, the port is closed or nginx answers with 502,
-# so this loop is what separates "still booting" from "never coming up".
+# On its first start, GitLab reconfigures itself and sets up its database before its web services come up.
+# This loop separates "still booting" from "never coming up".
 - name: Wait for the GitLab sign-in page to respond (up to 20m)
   ansible.builtin.uri:
     url: "{{ gitlab_verify_base_url }}/users/sign_in"
@@ -64,11 +61,10 @@
     fail_msg: "GitLab did not serve its sign-in page (got {{ gitlab_sign_in_page.status | default('no response') }})"
     success_msg: "GitLab serves its sign-in page"
 
-# The sign-in page can already respond while `gitlab-ctl reconfigure` is still running: its last steps
-# (clearing the cache, signalling and restarting services) can then drop the requests below mid-flight.
-# So GitLab is only considered started once no reconfigure (a `cinc-client` process) runs in the container.
-# `! pgrep` succeeds only if the container runs and has no such process, so a failing `docker exec` keeps waiting.
-# (The `[t]` keeps the pattern from matching the command line of the `sh` running it.)
+# The sign-in page can respond while `gitlab-ctl reconfigure` still runs, whose last steps (restarting services)
+# can drop the requests below. So wait until no reconfigure (a `cinc-client` process) runs in the container.
+# `! pgrep` only succeeds if the container runs without such a process.
+# (The `[t]` keeps the pattern from matching the `sh` running it.)
 - name: Wait for GitLab to finish reconfiguring itself (up to 10m)
   ansible.builtin.command:
     cmd: docker exec gitlab sh -c '! pgrep -f "cinc-clien[t]"'
@@ -123,10 +119,8 @@
       the authenticated checks below would then be meaningless
     success_msg: "The GitLab API rejects unauthenticated requests"
 
-# Signing in goes through the web form rather than the API, because GitLab no longer
-# allows exchanging a password for an API token (the OAuth password grant) by default.
-# The form is protected against CSRF, so each attempt needs a token and the session
-# cookie it belongs to, both taken from a fresh sign-in page.
+# Signing in uses the web form, as GitLab no longer allows exchanging a password for an API token by default.
+# The form is protected against CSRF, so each attempt needs the token and session cookie of a fresh sign-in page.
 - name: Sign in to GitLab with a wrong password
   ansible.builtin.include_tasks: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/molecule/verify_tasks_sign_in.yml"
   vars:
@@ -144,9 +138,8 @@
       the credentials check below cannot fail and is worthless
     success_msg: "GitLab rejects a wrong password"
 
-# The `root` user only has this password because the role wrote `gitlab_rails['initial_root_password']`
-# into `/etc/gitlab/gitlab.rb`. A GitLab running on anything other than the role's configuration
-# generates a random password instead, and would reject this.
+# The `root` user only has this password if GitLab runs on the role's `gitlab.rb`.
+# Otherwise, GitLab generates a random one.
 - name: Sign in to GitLab with the configured credentials
   ansible.builtin.include_tasks: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/molecule/verify_tasks_sign_in.yml"
   vars:
@@ -199,8 +192,7 @@
   # which is what the assertions below are about.
   failed_when: false
 
-# Whether GitLab runs its own database and Redis servers depends entirely on what the role
-# wrote into `gitlab.rb`, so this proves that the database and Redis settings reached GitLab.
+# Which of these run depends on `gitlab.rb`, so this proves that the database and Redis settings reached GitLab.
 - name: Assert that the bundled database and Redis servers run only when they are supposed to
   ansible.builtin.assert:
     that:
@@ -247,9 +239,8 @@
         fail_msg: "The container registry did not respond as expected ({{ gitlab_registry.status | default('no response') }})"
         success_msg: "The container registry responds"
 
-# GitLab's own backup tool dumps the database with the `pg_dump` client bundled in the container image, which
-# refuses to dump a server of a newer major version than its own. With an external database, this proves that
-# `gitlab_database_postgres_version` selects a client which matches the server.
+# `gitlab-backup` uses the bundled `pg_dump` client, which cannot dump a server of a newer major version.
+# With an external database, this proves that `gitlab_database_postgres_version` selects a matching client.
 - name: Create a GitLab backup
   ansible.builtin.command:
     cmd: docker exec gitlab gitlab-backup create
@@ -273,9 +264,8 @@
       {{ (gitlab_backup.stdout_lines + gitlab_backup.stderr_lines)[-30:] }}
     success_msg: "GitLab created a backup"
 
-# Before upgrading GitLab to a new minor or major version, tasks/install.yml runs this same command
-# and parses its output, which has to contain a `Database: main` line for that. This makes sure that
-# the command works, and that its output is still in the format the role understands.
+# tasks/install.yml runs this command before an upgrade, and parses its output (which needs a `Database: main` line).
+# This makes sure that the command still works and prints what the role looks for.
 - name: Retrieve the status of GitLab's batched background migrations
   ansible.builtin.command:
     cmd: docker exec gitlab /opt/gitlab/bin/gitlab-rake gitlab:background_migrations:status
@@ -319,8 +309,7 @@
     src: /gitlab/labels
   register: gitlab_labels
 
-# Traefik is disabled in this scenario, so not one Traefik label may be emitted. Roles across
-# this fleet have repeatedly grown labels outside the `traefik_enabled` conditional.
+# Traefik is disabled in this scenario, so no Traefik label may be emitted.
 - name: Assert that no Traefik labels are emitted while Traefik is disabled
   ansible.builtin.assert:
     that: "'traefik' not in (gitlab_labels.content | b64decode)"
@@ -345,9 +334,8 @@
 - name: Verify nothing was quietly restarting while all of that was being checked
   when: "gitlab_restarts_check_enabled | bool"
   block:
-    # `Restart=always` means the unit reads `active` while it is crash-looping,
-    # so `active` on its own says very little. The window has to be watched with
-    # everything already answering.
+    # `Restart=always` means the unit reads `active` while crash-looping,
+    # so this watches it with everything already answering.
     - name: Sample the restart counters
       ansible.builtin.systemd_service:
         name: "{{ item }}"
