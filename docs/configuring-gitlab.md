@@ -25,14 +25,14 @@ GitLab is considerably more resource-intensive than most self-hosted services. I
 
 ### Database
 
-GitLab requires a [Postgres](https://www.postgresql.org/) database. By default this role is configured to use an external Postgres server, such as one installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres), which is maintained by the [Mother-of-All-Self-Hosting (MASH)](https://github.com/mother-of-all-self-hosting) team.
+GitLab requires a [Postgres](https://www.postgresql.org/) database. By default this role uses the Postgres server that is bundled in the GitLab container image, which requires no configuration.
 
-Alternatively, it's possible to use the Postgres server that is bundled in the GitLab container image. See [below](#using-the-bundled-database-server) for details.
+Alternatively, it's possible to use an external Postgres server, such as one installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres), which is maintained by the [Mother-of-All-Self-Hosting (MASH)](https://github.com/mother-of-all-self-hosting) team. The [MASH playbook](https://github.com/mother-of-all-self-hosting/mash-playbook) does this automatically if its Postgres service is enabled. See [below](#using-an-external-postgres-server) for details.
 
 >[!NOTE]
 > GitLab supports only a specific range of Postgres versions. Refer to [this page](https://docs.gitlab.com/install/requirements/#postgresql) for the versions supported by the GitLab version you install. At the time of writing, GitLab 19 officially supports Postgres 17 only.
 >
-> This role nevertheless defaults to (and is tested with) Postgres 18, which is what ansible-role-postgres installs. GitLab 19.3 and later bundle Postgres 18 themselves (as an option for new installations), and GitLab works with it, but be aware that it is outside the range GitLab officially supports. To stay within that range, use Postgres 17, and set `gitlab_database_postgres_version: 17` (see [below](#configuring-the-database)).
+> For an external Postgres server, this role nevertheless defaults to (and is tested with) Postgres 18, which is what ansible-role-postgres installs. GitLab 19.3 and later bundle Postgres 18 themselves (as an option for new installations), and GitLab works with it, but be aware that it is outside the range GitLab officially supports. To stay within that range, use Postgres 17, and set `gitlab_database_postgres_version: 17` (see [below](#matching-the-postgres-version)).
 
 ## Adjusting the playbook configuration
 
@@ -80,11 +80,20 @@ If you do not set it, GitLab generates a random password and writes it to the `i
 >
 > As long as it is set, the password is stored in plain text in the `gitlab.rb` file in the configuration directory. Once you have signed in for the first time, you can remove it from your `vars.yml` file, which removes it from there on the next run of the playbook (and restarts GitLab).
 
-### Configuring the database
+### Configuring the database (optional)
 
-By default, the role connects to the Postgres server via TCP. At least the following settings need to be configured:
+By default, the Postgres server which is bundled in the GitLab container image is used. Its data is stored in the `postgresql` directory in the data directory (`gitlab_data_path`), and it is backed up by [GitLab's own backup tool](#backing-up-gitlab), but not by any tool which backs up an external Postgres server.
+
+>[!WARNING]
+> GitLab upgrades the bundled Postgres server to a new major version on its own terms. Refer to [this page](https://docs.gitlab.com/omnibus/settings/database/#upgrade-packaged-postgresql-server) for details.
+
+#### Using an external Postgres server
+
+To use an external Postgres server instead, add the following configuration to your `vars.yml` file. By default, the role connects to the Postgres server via TCP, and at least these settings need to be configured:
 
 ```yaml
+gitlab_database_type: postgres
+
 gitlab_database_postgres_hostname: YOUR_POSTGRES_SERVER_HOSTNAME_HERE
 
 gitlab_database_postgres_password: YOUR_POSTGRES_PASSWORD_HERE
@@ -103,6 +112,9 @@ gitlab_database_postgres_socket_enabled: true
 # Specify the path to the directory containing the Postgres Unix socket on the host (bind-mount source)
 gitlab_database_postgres_socket_path_host: /postgres/run
 ```
+
+>[!WARNING]
+> Switching between the bundled and an external Postgres server does not migrate any data: GitLab starts with an empty database on the other server. To move an existing installation, [back it up](#backing-up-gitlab) and restore the backup after switching.
 
 #### Matching the Postgres version
 
@@ -152,24 +164,11 @@ postgres_max_connections: 400
 >   - "-c 'max_locks_per_transaction=128'"
 > ```
 
-#### Using the bundled database server
-
-To use the Postgres server which is bundled in the GitLab container image instead of an external one, add the following configuration to your `vars.yml` file:
-
-```yaml
-gitlab_database_type: bundled
-```
-
-Its data is then stored in the `postgresql` directory in the data directory (`gitlab_data_path`), and it is backed up by [GitLab's own backup tool](#backing-up-gitlab), but not by any tool which backs up an external Postgres server.
-
->[!WARNING]
-> GitLab upgrades the bundled Postgres server to a new major version on its own terms. Refer to [this page](https://docs.gitlab.com/omnibus/settings/database/#upgrade-packaged-postgresql-server) for details.
-
 ### Configuring Redis (optional)
 
 GitLab also requires a [Redis](https://redis.io/)-compatible data store. By default, the Redis server bundled in the GitLab container image is used, which requires no configuration.
 
-To use an external server instead, such as [Valkey](https://valkey.io/) installed with [ansible-role-valkey](https://github.com/mother-of-all-self-hosting/ansible-role-valkey), add the following configuration to your `vars.yml` file:
+To use an external server instead, such as [Valkey](https://valkey.io/) installed with [ansible-role-valkey](https://github.com/mother-of-all-self-hosting/ansible-role-valkey), add the following configuration to your `vars.yml` file. The [MASH playbook](https://github.com/mother-of-all-self-hosting/mash-playbook) does this automatically if its Valkey service is enabled.
 
 ```yaml
 gitlab_redis_hostname: YOUR_REDIS_SERVER_HOSTNAME_HERE

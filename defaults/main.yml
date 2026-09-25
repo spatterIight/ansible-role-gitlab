@@ -338,12 +338,12 @@ gitlab_container_cleanup_command: |
 
 # Specify which database GitLab uses.
 # Valid values:
-# - postgres: an external Postgres server (e.g. one managed by https://github.com/mother-of-all-self-hosting/ansible-role-postgres)
 # - bundled: the PostgreSQL server bundled in the GitLab container image, which stores its data in `gitlab_data_path`
+# - postgres: an external Postgres server (e.g. one managed by https://github.com/mother-of-all-self-hosting/ansible-role-postgres)
 #
 # Note: GitLab requires a specific range of Postgres versions, and its schema needs more locks than
 # a Postgres server with default settings may provide. See `docs/configuring-gitlab.md` for details.
-gitlab_database_type: postgres
+gitlab_database_type: bundled
 
 # Specify database configuration
 gitlab_database_postgres_hostname: ""
@@ -395,7 +395,8 @@ gitlab_config_db_host: "{{ gitlab_database_postgres_socket_path_container if git
 ########################################################################
 
 # By default, GitLab uses the Redis server which is bundled in its container image.
-# It can be configured to use an external Redis-compatible server (e.g. Valkey) by specifying `gitlab_redis_hostname`.
+# It can be configured to use an external Redis-compatible server (e.g. Valkey,
+# managed by https://github.com/mother-of-all-self-hosting/ansible-role-valkey) by specifying `gitlab_redis_hostname`.
 #
 # Connecting via a Unix socket is intentionally not supported: GitLab's services run as users which only exist
 # inside its container (e.g. `git`), which cannot access the socket directories of other containers

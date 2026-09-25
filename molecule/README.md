@@ -47,7 +47,7 @@ Currently these testing scenarios are available:
 
 ### `default`
 
-Tests a standard GitLab installation, which uses the Postgres and Redis servers bundled in the GitLab container image (`gitlab_database_type: bundled`).
+Tests a standard GitLab installation with the role's default configuration, which uses the Postgres and Redis servers bundled in the GitLab container image.
 
 ### `postgres`
 
