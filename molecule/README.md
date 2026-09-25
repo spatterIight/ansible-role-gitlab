@@ -47,7 +47,7 @@ Currently these testing scenarios are available:
 
 ### `default`
 
-Tests a standard GitLab installation, which uses the Postgres and Redis servers bundled in the GitLab container image (`gitlab_database_type: bundled`).
+Tests a standard GitLab installation with the role's default configuration, which uses the Postgres and Redis servers bundled in the GitLab container image.
 
 ### `postgres`
 
@@ -69,6 +69,9 @@ The verification does not stop at "the systemd service is active" — the unit i
 - asserts that the running GitLab reports the version `gitlab_version` pins and the expected edition, via `/api/v4/version`
 - asserts that the bundled Postgres and Redis servers run inside the container if and only if the scenario asks for them, which proves that the database and Redis settings reached GitLab
 - asserts that GitLab's SSH server runs and answers on the published port if and only if one is published, and (if enabled) that the container registry answers on its own
+- creates a backup with GitLab's own backup tool (`gitlab-backup create`). With an external Postgres server, this proves that `gitlab_database_postgres_version` selects a `pg_dump` client which matches the server, as a mismatched one refuses to dump it
+- asserts that `gitlab-rake gitlab:background_migrations:status`, which the role runs (and parses) before upgrading GitLab to a new minor or major version, works and still prints what the role looks for
+- with an external Postgres server, asserts that the `amcheck` extension (which GitLab requires, and only a superuser may create) exists
 - asserts that no Traefik labels are emitted while Traefik is disabled, and that `gitlab.rb` (which contains secrets) is only readable by `root`
 - watches the services for 45 seconds to make sure none of them is quietly restarting
 

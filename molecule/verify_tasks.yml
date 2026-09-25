@@ -204,7 +204,7 @@
 - name: Assert that the bundled database and Redis servers run only when they are supposed to
   ansible.builtin.assert:
     that:
-      - "('run: postgresql:' in gitlab_ctl_status.stdout) == (gitlab_database_type == 'bundled')"
+      - "('run: postgresql:' in gitlab_ctl_status.stdout) == (gitlab_database_type | default(gitlab_defaults.gitlab_database_type) == 'bundled')"
       - "('run: redis:' in gitlab_ctl_status.stdout) == (not gitlab_verify_external_redis_expected)"
       - "'run: puma:' in gitlab_ctl_status.stdout"
       - "'run: sidekiq:' in gitlab_ctl_status.stdout"
@@ -246,6 +246,72 @@
           - gitlab_registry.docker_distribution_api_version | default('') == 'registry/2.0'
         fail_msg: "The container registry did not respond as expected ({{ gitlab_registry.status | default('no response') }})"
         success_msg: "The container registry responds"
+
+# GitLab's own backup tool dumps the database with the `pg_dump` client bundled in the container image, which
+# refuses to dump a server of a newer major version than its own. With an external database, this proves that
+# `gitlab_database_postgres_version` selects a client which matches the server.
+- name: Create a GitLab backup
+  ansible.builtin.command:
+    cmd: docker exec gitlab gitlab-backup create
+  register: gitlab_backup
+  changed_when: false
+  failed_when: false
+
+- name: Find the GitLab backup
+  ansible.builtin.find:
+    paths: /gitlab/data/backups
+    patterns: "*_gitlab_backup.tar"
+  register: gitlab_backup_files
+
+- name: Assert that GitLab created a backup
+  ansible.builtin.assert:
+    that:
+      - gitlab_backup.rc == 0
+      - gitlab_backup_files.matched > 0
+    fail_msg: >-
+      gitlab-backup exited with {{ gitlab_backup.rc }} and {{ gitlab_backup_files.matched }} backup(s) were found:
+      {{ (gitlab_backup.stdout_lines + gitlab_backup.stderr_lines)[-30:] }}
+    success_msg: "GitLab created a backup"
+
+# Before upgrading GitLab to a new minor or major version, tasks/install.yml runs this same command
+# and parses its output, which has to contain a `Database: main` line for that. This makes sure that
+# the command works, and that its output is still in the format the role understands.
+- name: Retrieve the status of GitLab's batched background migrations
+  ansible.builtin.command:
+    cmd: docker exec gitlab /opt/gitlab/bin/gitlab-rake gitlab:background_migrations:status
+  register: gitlab_background_migrations_status
+  changed_when: false
+  failed_when: false
+
+- name: Assert that the status of GitLab's batched background migrations is in the format the role parses
+  ansible.builtin.assert:
+    that:
+      - gitlab_background_migrations_status.rc == 0
+      - "'Database: main' in gitlab_background_migrations_status.stdout_lines"
+    fail_msg: >-
+      `gitlab-rake gitlab:background_migrations:status` exited with {{ gitlab_background_migrations_status.rc }}
+      or printed something the role does not understand:
+      {{ (gitlab_background_migrations_status.stdout_lines + gitlab_background_migrations_status.stderr_lines)[-30:] }}
+    success_msg: "The status of GitLab's batched background migrations is in the format the role parses"
+
+# ansible-role-postgres runs the scenario's `additional_sql_queries` as its superuser.
+- name: Verify the extension GitLab requires which only a superuser may create
+  when: gitlab_database_type | default(gitlab_defaults.gitlab_database_type) == 'postgres'
+  block:
+    - name: Query the Postgres extensions in the GitLab database
+      ansible.builtin.command:
+        cmd: >-
+          /postgres/bin/cli-non-interactive -d {{ gitlab_database_name }} -tAc
+          "SELECT extname FROM pg_extension WHERE extname = 'amcheck'"
+      register: gitlab_postgres_amcheck
+      changed_when: false
+      failed_when: false
+
+    - name: Assert that the amcheck extension exists in the GitLab database
+      ansible.builtin.assert:
+        that: "'amcheck' in gitlab_postgres_amcheck.stdout_lines"
+        fail_msg: "The amcheck extension does not exist in the GitLab database: {{ gitlab_postgres_amcheck.stdout_lines + gitlab_postgres_amcheck.stderr_lines }}"
+        success_msg: "The amcheck extension exists in the GitLab database"
 
 # The scenario leaves `gitlab_identifier` at its default, so the base path is /gitlab.
 - name: Read the container label file
@@ -325,3 +391,5 @@
       - "GitLab sign-in with the configured credentials: HTTP {{ gitlab_sign_in.status }}"
       - "GitLab services: {{ gitlab_ctl_status.stdout_lines | map('regex_replace', '^(\\w+: [\\w-]+):.*$', '\\1') | list }}"
       - "GitLab SSH: {{ ('greets on port ' ~ gitlab_container_ssh_host_bind_port) if gitlab_verify_ssh_expected | bool else 'not running (its port is not published)' }}"
+      - "GitLab backup: {{ gitlab_backup_files.files | map(attribute='path') | map('basename') | list }}"
+      - "GitLab batched background migrations (by status): {{ gitlab_background_migrations_status.stdout_lines | select('match', '^[a-z_]+ +[|] ') | map('regex_replace', '^([a-z_]+) .*$', '\\1') | list }}"

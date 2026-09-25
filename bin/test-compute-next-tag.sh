@@ -31,13 +31,19 @@ trap cleanup EXIT
 
 # Starts a scenario with a repository at GitLab 19.4.1 which has already
 # seen two releases of it (v19.4.1-0 and v19.4.1-1).
+#
+# The defaults file deliberately carries the traps this role's real one has: the
+# `# renovate:` annotation that has to sit on the version line, a commented-out
+# example of the version variable, and the image variables derived from it - one
+# of which appends the edition and package revision to it. None of them may be
+# picked up as the version.
 scenario() {
 	echo "$1"
 
 	cleanup
 	workdir="$(mktemp -d)"
 
-	mkdir -p "$workdir/bin" "$workdir/defaults" "$workdir/tasks" "$workdir/templates"
+	mkdir -p "$workdir/bin" "$workdir/defaults" "$workdir/meta" "$workdir/tasks" "$workdir/templates"
 	cp "$script_under_test" "$workdir/bin/"
 	cd "$workdir"
 
@@ -46,7 +52,15 @@ scenario() {
 	git config user.name 'Test'
 	git config commit.gpgsign false
 
-	printf 'gitlab_version: 19.4.1\n' > defaults/main.yml
+	cat > defaults/main.yml <<-'YAML'
+		# gitlab_version: 9.9.9
+		# renovate: datasource=docker depName=gitlab/gitlab-ce versioning=semver
+		gitlab_version: 19.4.1
+		gitlab_edition: ce
+		gitlab_container_image: "docker.io/gitlab/gitlab-{{ gitlab_edition }}:{{ gitlab_container_image_tag }}"
+		gitlab_container_image_tag: "{{ gitlab_version }}-{{ gitlab_edition }}.0"
+	YAML
+	printf 'placeholder\n' > meta/main.yml
 	printf 'placeholder\n' > tasks/main.yml
 	printf 'placeholder\n' > templates/env.j2
 	printf 'placeholder\n' > README.md
@@ -89,8 +103,10 @@ expect() {
 	fi
 }
 
-bump_version="sed -i 's|gitlab_version: 19.4.1|gitlab_version: 19.5.0|' defaults/main.yml"
-revert_version="sed -i 's|gitlab_version: 19.5.0|gitlab_version: 19.4.1|' defaults/main.yml"
+bump_version="sed -i 's|^gitlab_version: 19.4.1|gitlab_version: 19.5.0|' defaults/main.yml"
+revert_version="sed -i 's|^gitlab_version: 19.5.0|gitlab_version: 19.4.1|' defaults/main.yml"
+patch_version="sed -i 's|^gitlab_version: 19.4.1|gitlab_version: 19.4.2|' defaults/main.yml"
+edit_meta="printf 'a line\n' >> meta/main.yml"
 edit_task="printf 'a task\n' >> tasks/main.yml"
 edit_template="printf 'a line\n' >> templates/env.j2"
 edit_readme="printf 'documentation\n' >> README.md"
@@ -107,6 +123,13 @@ expect 'template'     v19.5.0-2 "$(merge "$edit_template")"
 scenario 'A version bump merged after other role changes'
 expect 'task edit'    v19.4.1-2 "$(merge "$edit_task")"
 expect 'version bump' v19.5.0-0 "$(merge "$bump_version")"
+
+# The class of bump Renovate is allowed to automerge here.
+scenario 'A patch-level version bump'
+expect 'patch bump' v19.4.2-0 "$(merge "$patch_version")"
+
+scenario 'A change to the role metadata'
+expect 'meta' v19.4.1-2 "$(merge "$edit_meta")"
 
 scenario 'Commits that do not affect the role'
 expect 'README'   ''        "$(merge "$edit_readme")"

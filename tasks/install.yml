@@ -29,28 +29,6 @@
     - { path: "{{ gitlab_logs_path }}", mode: "0755" }
     - { path: "{{ gitlab_data_path }}", mode: "0755" }
 
-# This file contains secrets (e.g. the database password), so only `root` (which GitLab runs as) may read it.
-- name: Ensure GitLab configuration installed
-  ansible.builtin.template:
-    src: "{{ role_path }}/templates/gitlab.rb.j2"
-    dest: "{{ gitlab_config_path }}/gitlab.rb"
-    mode: "0600"
-    owner: root
-    group: root
-  register: gitlab_config_result
-
-- name: Ensure GitLab support files installed
-  ansible.builtin.template:
-    src: "{{ role_path }}/templates/{{ item }}.j2"
-    dest: "{{ gitlab_base_path }}/{{ item }}"
-    mode: "0640"
-    owner: "{{ gitlab_uid }}"
-    group: "{{ gitlab_gid }}"
-  with_items:
-    - env
-    - labels
-  register: gitlab_support_files_result
-
 - name: Ensure GitLab container image is pulled via community.docker.docker_image_pull
   when: devture_systemd_docker_base_container_image_pull_method == 'ansible-module'
   community.docker.docker_image_pull:
@@ -75,8 +53,9 @@
 # and refuses to start if it cannot (e.g. when a required upgrade stop was skipped). As the systemd service
 # restarts it, GitLab would then remain down, trying to start over and over.
 #
-# The same check is done here instead, with GitLab's own tool from the new container image, before the systemd
-# service is pointed to that image. This way, the playbook run fails with an explanation, and GitLab stays up.
+# The same check is done here instead, with GitLab's own tool from the new container image, before anything
+# on the host is pointed to that image (the configuration included, as the old container would otherwise apply
+# it the next time it restarts). This way, the playbook run fails with an explanation, and GitLab stays up.
 - name: Check whether GitLab can be upgraded to the configured version
   when: gitlab_upgrade_check_enabled | bool
   block:
@@ -91,15 +70,16 @@
         src: "{{ gitlab_data_path }}/gitlab-rails/VERSION"
       register: gitlab_installed_version_file
 
-    # The file contains the version GitLab ran when it was last started, possibly with a suffix (e.g. `19.4.1-ee`).
+    # The file contains the version GitLab ran when it was last started,
+    # with an `-ee` suffix for the Enterprise Edition (e.g. `19.4.1-ee`).
     - name: Determine the version of the existing GitLab installation
       ansible.builtin.set_fact:
+        gitlab_installed_version_full: "{{ (gitlab_installed_version_file.content | b64decode | trim) if gitlab_installed_version_file_stat.stat.exists else '' }}"
+
+    - name: Determine the version number of the existing GitLab installation
+      ansible.builtin.set_fact:
         gitlab_installed_version: >-
-          {{
-            (gitlab_installed_version_file.content | b64decode | trim | regex_search('^[0-9]+\.[0-9]+\.[0-9]+') or '')
-            if gitlab_installed_version_file_stat.stat.exists
-            else ''
-          }}
+          {{ gitlab_installed_version_full | regex_search('^[0-9]+\.[0-9]+\.[0-9]+') or '' }}
 
     - name: Fail if GitLab would be downgraded
       ansible.builtin.fail:
@@ -107,6 +87,17 @@
           GitLab {{ gitlab_installed_version }} is installed, but gitlab_version is set to {{ gitlab_version }}.
           Downgrading GitLab is not supported.
       when: "gitlab_installed_version != '' and gitlab_installed_version is version(gitlab_version | string, '>')"
+
+    # The Community Edition cannot read everything the Enterprise Edition may have stored (e.g. EE-only integrations),
+    # so GitLab needs to be prepared for it by hand first.
+    - name: Fail if GitLab would be switched from the Enterprise Edition to the Community Edition
+      ansible.builtin.fail:
+        msg: >-
+          GitLab {{ gitlab_installed_version_full }} (Enterprise Edition) is installed, but gitlab_edition is set to `ce`.
+          Switching to the Community Edition needs manual preparation first,
+          see https://docs.gitlab.com/update/convert_to_ee/revert/ for details.
+          Once that is done, set gitlab_upgrade_check_enabled to `false` for the one run which switches the edition.
+      when: "gitlab_edition == 'ce' and gitlab_installed_version_full is search('-ee$')"
 
     - name: Check whether GitLab can be upgraded directly from the existing installation
       when: "gitlab_installed_version != '' and gitlab_installed_version is version(gitlab_version | string, '<')"
@@ -125,10 +116,94 @@
       ansible.builtin.fail:
         msg: >-
           GitLab cannot be upgraded directly from {{ gitlab_installed_version }} (the installed version) to {{ gitlab_version }}.
-          Upgrade to the required upgrade stop(s) in between first, by setting gitlab_version to each of them in turn.
+          Upgrade to the required upgrade stop(s) in between first, by setting gitlab_version to each of them in turn
+          (and removing that setting again once you have caught up).
           See https://docs.gitlab.com/update/upgrade_paths/ for details.
           GitLab says: {{ (gitlab_upgrade_check_result.stderr_lines + gitlab_upgrade_check_result.stdout_lines) | join(' ') }}
       when: "gitlab_upgrade_check_result.rc | default(0) != 0"
+
+    # The database migrations of a new minor or major version may depend on the batched background migrations
+    # queued by the versions before it, and fail if these have not finished yet. As GitLab reconfigures itself
+    # (and runs its database migrations) on start, it would then remain down, trying to start over and over.
+    - name: Check whether GitLab's batched background migrations have finished
+      when:
+        - gitlab_upgrade_check_background_migrations_enabled | bool
+        - gitlab_installed_version != ''
+        - gitlab_installed_version.split('.')[0:2] != (gitlab_version | string).split('.')[0:2]
+      block:
+        - name: Check whether the GitLab container is running
+          ansible.builtin.command:
+            cmd: "{{ devture_systemd_docker_base_host_command_docker }} container inspect {{ gitlab_identifier }}"
+          register: gitlab_container_inspect_result
+          changed_when: false
+          failed_when: false
+
+        # Prints a `Database: <name>` line per database, followed by a `<status> | <migration>` line per migration.
+        - name: Retrieve the status of GitLab's batched background migrations
+          when: "gitlab_container_inspect_result.rc == 0 and (gitlab_container_inspect_result.stdout | from_json | first).State.Running"
+          ansible.builtin.command:
+            cmd: >-
+              {{ devture_systemd_docker_base_host_command_docker }} exec
+              {{ gitlab_identifier }}
+              /opt/gitlab/bin/gitlab-rake gitlab:background_migrations:status
+          register: gitlab_background_migrations_status_result
+          changed_when: false
+          failed_when: false
+
+        - name: Fail if the status of GitLab's batched background migrations could not be retrieved
+          ansible.builtin.fail:
+            msg: >-
+              The status of GitLab's batched background migrations could not be retrieved, so it's unknown whether
+              GitLab can be upgraded to {{ gitlab_version }} yet. Make sure that GitLab is up and working,
+              or set gitlab_upgrade_check_background_migrations_enabled to `false` to skip this check.
+              GitLab says: {{ (gitlab_background_migrations_status_result.stderr_lines + gitlab_background_migrations_status_result.stdout_lines) | join(' ') }}
+          # Without the `Database: main` line, the output is not in the format this role understands.
+          when: >-
+            gitlab_background_migrations_status_result is not skipped
+            and (gitlab_background_migrations_status_result.rc != 0 or 'Database: main' not in gitlab_background_migrations_status_result.stdout_lines)
+
+        - name: Determine GitLab's unfinished batched background migrations
+          when: gitlab_background_migrations_status_result is not skipped
+          ansible.builtin.set_fact:
+            gitlab_background_migrations_unfinished: >-
+              {{
+                gitlab_background_migrations_status_result.stdout_lines
+                | select('match', '^[a-z_]+ +[|] ')
+                | reject('match', '^(finished|finalized) ')
+                | list
+              }}
+
+        - name: Fail if GitLab has unfinished batched background migrations
+          ansible.builtin.fail:
+            msg: >-
+              GitLab cannot be upgraded from {{ gitlab_installed_version }} to {{ gitlab_version }} yet,
+              because some of its batched background migrations have not finished:
+              {{ gitlab_background_migrations_unfinished | map('regex_replace', ' +[|] ', ': ') | join('; ') }}.
+              Wait for them to finish (see Admin area > Monitoring > Background migrations), and try again.
+              If any of them failed, see https://docs.gitlab.com/update/background_migrations/ for how to resolve that.
+          when: "gitlab_background_migrations_status_result is not skipped and gitlab_background_migrations_unfinished | length > 0"
+
+# This file contains secrets (e.g. the database password), so only `root` (which GitLab runs as) may read it.
+- name: Ensure GitLab configuration installed
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/gitlab.rb.j2"
+    dest: "{{ gitlab_config_path }}/gitlab.rb"
+    mode: "0600"
+    owner: root
+    group: root
+  register: gitlab_config_result
+
+- name: Ensure GitLab support files installed
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/{{ item }}.j2"
+    dest: "{{ gitlab_base_path }}/{{ item }}"
+    mode: "0640"
+    owner: "{{ gitlab_uid }}"
+    group: "{{ gitlab_gid }}"
+  with_items:
+    - env
+    - labels
+  register: gitlab_support_files_result
 
 - name: Ensure GitLab container network is created via community.docker.docker_network
   when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'

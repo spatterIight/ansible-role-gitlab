@@ -45,8 +45,8 @@ provisioner:
         gitlab_container_ssh_host_bind_port: 2222
         gitlab_config_initial_root_password: Molecule-Test-Pass-9471
 
-        # This scenario tests the database and Redis servers bundled in the GitLab container image.
-        gitlab_database_type: bundled
+        # This scenario relies on the role's defaults, which use the database and Redis servers
+        # bundled in the GitLab container image.
   env:
     # Workaround for https://github.com/ansible/molecule/issues/4391
     ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles

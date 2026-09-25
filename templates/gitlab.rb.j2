@@ -53,6 +53,8 @@ puma['worker_processes'] = {{ gitlab_config_puma_worker_processes | int }}
 sidekiq['concurrency'] = {{ gitlab_config_sidekiq_concurrency | int }}
 {% endif %}
 
+gitlab_rails['backup_keep_time'] = {{ gitlab_config_backup_keep_time | int }}
+
 ## Email
 gitlab_rails['gitlab_email_enabled'] = {{ gitlab_config_email_enabled | bool | to_json }}
 {% if gitlab_config_email_from %}
@@ -90,6 +92,10 @@ gitlab_rails['db_username'] = {{ rb(gitlab_database_postgres_username) }}
 gitlab_rails['db_password'] = {{ rb(gitlab_database_postgres_password) }}
 {% if not gitlab_database_postgres_socket_enabled %}
 gitlab_rails['db_sslmode'] = {{ rb(gitlab_database_postgres_sslmode) }}
+{% endif %}
+{% if gitlab_database_postgres_version | string | length > 0 %}
+## Selects the bundled `pg_dump` and `psql` clients used by `gitlab-backup`, which must match the server's major version.
+postgresql['version'] = {{ gitlab_database_postgres_version | int }}
 {% endif %}
 {% endif %}
 

@@ -25,12 +25,12 @@ GitLab is considerably more resource-intensive than most self-hosted services. I
 
 ### Database
 
-GitLab requires a [Postgres](https://www.postgresql.org/) database. By default this role is configured to use an external Postgres server, such as one installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres), which is maintained by the [Mother-of-All-Self-Hosting (MASH)](https://github.com/mother-of-all-self-hosting) team.
-
-Alternatively, it's possible to use the Postgres server that is bundled in the GitLab container image. See [below](#using-the-bundled-database-server) for details.
+GitLab requires a [Postgres](https://www.postgresql.org/) database. By default, the Postgres server bundled in the GitLab container image is used. Alternatively, an external Postgres server can be used, such as one installed with [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres). See [below](#using-an-external-postgres-server) for details.
 
 >[!NOTE]
-> GitLab supports only a specific range of Postgres versions. Refer to [this page](https://docs.gitlab.com/install/requirements/#postgresql) for the versions supported by the GitLab version you install. At the time of writing, GitLab 19 supports Postgres 17 and 18.
+> GitLab supports only a specific range of Postgres versions. Refer to [this page](https://docs.gitlab.com/install/requirements/#postgresql) for the versions supported by the GitLab version you install. At the time of writing, GitLab 19 officially supports Postgres 17 only.
+>
+> For an external Postgres server, this role nevertheless defaults to (and is tested with) Postgres 18, which is what ansible-role-postgres installs. GitLab 19.3 and later bundle Postgres 18 themselves (as an option for new installations), and GitLab works with it, but be aware that it is outside the range GitLab officially supports. To stay within that range, use Postgres 17, and set `gitlab_database_postgres_version: 17` (see [below](#matching-the-postgres-version)).
 
 ## Adjusting the playbook configuration
 
@@ -75,12 +75,23 @@ If you do not set it, GitLab generates a random password and writes it to the `i
 
 >[!NOTE]
 > Changing this value has no effect once GitLab has been installed. To change the password afterwards, use GitLab's web interface.
+>
+> As long as it is set, the password is stored in plain text in the `gitlab.rb` file in the configuration directory. Once you have signed in for the first time, you can remove it from your `vars.yml` file, which removes it from there on the next run of the playbook (and restarts GitLab).
 
-### Configuring the database
+### Configuring the database (optional)
 
-By default, the role connects to the Postgres server via TCP. At least the following settings need to be configured:
+By default, the Postgres server bundled in the GitLab container image is used. It stores its data in the `postgresql` directory in `gitlab_data_path`.
+
+>[!WARNING]
+> GitLab upgrades the bundled Postgres server to a new major version on its own terms. Refer to [this page](https://docs.gitlab.com/omnibus/settings/database/#upgrade-packaged-postgresql-server) for details.
+
+#### Using an external Postgres server
+
+To use an external Postgres server (via TCP) instead, add the following configuration to your `vars.yml` file:
 
 ```yaml
+gitlab_database_type: postgres
+
 gitlab_database_postgres_hostname: YOUR_POSTGRES_SERVER_HOSTNAME_HERE
 
 gitlab_database_postgres_password: YOUR_POSTGRES_PASSWORD_HERE
@@ -100,34 +111,57 @@ gitlab_database_postgres_socket_enabled: true
 gitlab_database_postgres_socket_path_host: /postgres/run
 ```
 
-The database user needs to own the database, as GitLab creates the Postgres extensions it needs (`pg_trgm` and `btree_gist`) on its own.
+#### Matching the Postgres version
+
+GitLab's [backup tool](#backing-up-gitlab) dumps the database with the `pg_dump` client which is bundled in the GitLab container image, and `pg_dump` refuses to dump a server of a newer major version than its own. The role therefore tells GitLab which major version your Postgres server runs, so that it uses the matching client. It defaults to `18`, which is what ansible-role-postgres installs. If your server runs another major version, add the following configuration to your `vars.yml` file:
+
+```yaml
+gitlab_database_postgres_version: 17
+```
+
+#### Creating the extensions GitLab requires
+
+GitLab requires the Postgres extensions `pg_trgm`, `btree_gist` and `amcheck` in its database. It creates `pg_trgm` and `btree_gist` on its own (which is why the database user needs to own the database), but only a superuser may create `amcheck`, so it needs to be created once by hand.
+
+With ansible-role-postgres, run the command below on the server. With the MASH playbook, the script is at `/mash/postgres/bin/cli-non-interactive`, and the database name is whatever `gitlab_database_name` is set to.
+
+```sh
+/postgres/bin/cli-non-interactive -d gitlab -c 'CREATE EXTENSION IF NOT EXISTS amcheck;'
+```
+
+Refer to [this page](https://docs.gitlab.com/administration/postgresql/extensions/) for details.
+
+#### Tuning the Postgres server
+
+GitLab lists [settings which an external Postgres server needs](https://docs.gitlab.com/administration/postgresql/tune/#required-settings-for-external-instances). ansible-role-postgres tunes `shared_buffers` and `maintenance_work_mem` on its own, based on the server's memory, which is enough on a server with the 8 GB of memory GitLab recommends.
+
+`statement_timeout` and `work_mem` can be set for GitLab's database alone, which leaves any other services that use the same Postgres server unaffected. With ansible-role-postgres, run the command below on the server once (with the same adjustments for the MASH playbook as above):
+
+```sh
+/postgres/bin/cli-non-interactive -d gitlab \
+  -c "ALTER DATABASE gitlab SET statement_timeout = '60s';" \
+  -c "ALTER DATABASE gitlab SET work_mem = '8MB';"
+```
+
+`max_connections`, for which GitLab asks for at least 400, can only be set for the whole server. With ansible-role-postgres (which defaults to 200), add the following configuration to your `vars.yml` file:
+
+```yaml
+postgres_max_connections: 400
+```
 
 >[!IMPORTANT]
 > Loading GitLab's database schema takes a lot of locks in a single transaction. With a Postgres server's default settings (`max_connections=100`, `max_locks_per_transaction=64`), the initial installation fails with `ERROR: out of shared memory` / `HINT: You might need to increase "max_locks_per_transaction"`.
 >
-> [ansible-role-postgres](https://github.com/mother-of-all-self-hosting/ansible-role-postgres) configures `max_connections=200` by default, which is enough. If you run into this error nevertheless, raise the limit, for example with ansible-role-postgres:
+> ansible-role-postgres configures `max_connections=200` by default, which is enough. If you run into this error nevertheless, raise the limit, for example with ansible-role-postgres:
 >
 > ```yaml
 > postgres_process_extra_arguments_custom:
 >   - "-c 'max_locks_per_transaction=128'"
 > ```
 
-#### Using the bundled database server
-
-To use the Postgres server which is bundled in the GitLab container image instead of an external one, add the following configuration to your `vars.yml` file:
-
-```yaml
-gitlab_database_type: bundled
-```
-
-Its data is then stored in the `postgresql` directory in the data directory (`gitlab_data_path`), and it is backed up by [GitLab's own backup tool](#backing-up-gitlab), but not by any tool which backs up an external Postgres server.
-
->[!WARNING]
-> GitLab upgrades the bundled Postgres server to a new major version on its own terms. Refer to [this page](https://docs.gitlab.com/omnibus/settings/database/#upgrade-packaged-postgresql-server) for details.
-
 ### Configuring Redis (optional)
 
-GitLab also requires a [Redis](https://redis.io/)-compatible data store. By default, the Redis server bundled in the GitLab container image is used, which requires no configuration.
+GitLab also requires a [Redis](https://redis.io/)-compatible data store. By default, the Redis server bundled in the GitLab container image is used.
 
 To use an external server instead, such as [Valkey](https://valkey.io/) installed with [ansible-role-valkey](https://github.com/mother-of-all-self-hosting/ansible-role-valkey), add the following configuration to your `vars.yml` file:
 
@@ -160,6 +194,27 @@ GitLab then advertises clone URLs like `ssh://git@gitlab.example.com:2222/group/
 Make sure that your firewall allows incoming connections on that port.
 
 If you do not publish the port, the SSH server inside the container is not started. GitLab still shows SSH clone URLs in its web interface though, which do not work. To hide them, set **Enabled Git access protocols** to **Only HTTP(S)** in the **Admin area** under **Settings** → **General** → **Visibility and access controls**.
+
+#### Serving Git over SSH via Traefik
+
+Instead of publishing the port, you can have Traefik forward SSH connections to GitLab with a TCP router. In that case, the SSH server has to be enabled explicitly, and GitLab has to be told which port clients connect to, as it advertises port 22 in its clone URLs otherwise. For example, with Traefik listening for SSH connections on port `2222` (set up with [ansible-role-traefik](https://github.com/mother-of-all-self-hosting/ansible-role-traefik) here):
+
+```yaml
+gitlab_ssh_enabled: true
+gitlab_config_gitlab_shell_ssh_port: 2222
+
+gitlab_container_labels_additional_labels_custom:
+  - "traefik.tcp.routers.gitlab-ssh.rule=HostSNI(`*`)"
+  - "traefik.tcp.routers.gitlab-ssh.entrypoints=gitlab-ssh"
+  - "traefik.tcp.routers.gitlab-ssh.service=gitlab-ssh"
+  - "traefik.tcp.services.gitlab-ssh.loadbalancer.server.port=22"
+
+traefik_additional_entrypoints_custom:
+  - name: gitlab-ssh
+    port: 2222
+    host_bind_port: 2222
+    config: {}
+```
 
 ### Enabling the container registry (optional)
 
@@ -194,7 +249,7 @@ This connects to the SMTP server with STARTTLS (typically on port 587). If your 
 For other settings, check variables such as `gitlab_config_smtp_*` and `gitlab_config_email_*` on [`defaults/main.yml`](../defaults/main.yml).
 
 >[!NOTE]
-> Without an SMTP server, GitLab cannot send any email.
+> GitLab can only send emails via SMTP in its container. Unless SMTP is enabled, the role therefore disables sending emails altogether (see `gitlab_config_email_enabled`), so that GitLab does not keep trying (and failing) to send them.
 
 ### Reducing memory usage (optional)
 
@@ -308,6 +363,10 @@ docker exec -t gitlab gitlab-backup create
 
 Here and below, `gitlab` is the name of the container, which is set by `gitlab_identifier` (e.g. `mash-gitlab` with the MASH playbook).
 
+Backups older than 7 days are deleted whenever a new one is created. To keep them for longer (or forever, with `0`), set `gitlab_config_backup_keep_time` to the number of seconds to keep them for.
+
+With an external Postgres server, the backup tool can only dump the database if `gitlab_database_postgres_version` matches the server's major version (see [above](#matching-the-postgres-version)).
+
 >[!IMPORTANT]
 > This backup does not contain the configuration and secrets in the configuration directory (`gitlab_config_path`; most importantly `gitlab-secrets.json`), without which the encrypted data in the database cannot be read. Back them up separately, and store them apart from the other backup.
 
@@ -319,10 +378,13 @@ This role supports GitLab 19.2 and later only. To manage an existing installatio
 
 >[!WARNING]
 > GitLab cannot be upgraded from any version to any other version directly. Upgrades across several minor or major versions need to go through the "required upgrade stops" in between, one at a time. Refer to the [upgrade path tool](https://gitlab-com.gitlab.io/support/toolbox/upgrade-path/) and [this page](https://docs.gitlab.com/update/upgrade_paths/) to find them.
->
-> Before installing a new version, the role checks with GitLab's own tool whether GitLab can be upgraded to it directly. If it cannot, the role fails (and GitLab keeps running the version it runs), and the version needs to be set to the next required upgrade stop by setting `gitlab_version` in your `vars.yml` file, for example `gitlab_version: 19.2.7`. Before moving on to the next stop, wait for the batched background migrations of each stop to finish (see **Admin area** → **Monitoring** → **Background migrations**).
 
-Downgrading GitLab is not supported, and the role refuses to do it.
+Each new minor version of GitLab is released as its own version of this role, so that the role's releases never skip a required upgrade stop. Before installing a new version, the role checks:
+
+- with GitLab's own tool, whether GitLab can be upgraded to it directly from the version it runs. If it cannot, the role fails (and GitLab keeps running the version it runs). In that case, set `gitlab_version` in your `vars.yml` file to the next required upgrade stop (for example `gitlab_version: 19.5.4`), run the playbook, and repeat that for each stop in turn. Once you have caught up, remove `gitlab_version` from your `vars.yml` file again, as it would otherwise keep GitLab at that version for good.
+- before an upgrade to a new minor or major version, whether GitLab's batched background migrations have finished (as long as GitLab is running). GitLab requires this, as the database migrations of the new version may depend on them. If they have not finished yet, the role fails. In that case, wait for them to finish (see **Admin area** → **Monitoring** → **Background migrations**), and run the playbook again. This is also why you should wait for them to finish at each required upgrade stop.
+
+Downgrading GitLab is not supported, and the role refuses to do it. It also refuses to switch an existing installation from the Enterprise Edition to the Community Edition, which needs [manual preparation](https://docs.gitlab.com/update/convert_to_ee/revert/) first. Once that is done, set `gitlab_upgrade_check_enabled: false` for the one run which switches the edition.
 
 ## Troubleshooting
 
