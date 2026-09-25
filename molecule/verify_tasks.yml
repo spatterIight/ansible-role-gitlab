@@ -204,7 +204,7 @@
 - name: Assert that the bundled database and Redis servers run only when they are supposed to
   ansible.builtin.assert:
     that:
-      - "('run: postgresql:' in gitlab_ctl_status.stdout) == (gitlab_database_type == 'bundled')"
+      - "('run: postgresql:' in gitlab_ctl_status.stdout) == (gitlab_database_type | default(gitlab_defaults.gitlab_database_type) == 'bundled')"
       - "('run: redis:' in gitlab_ctl_status.stdout) == (not gitlab_verify_external_redis_expected)"
       - "'run: puma:' in gitlab_ctl_status.stdout"
       - "'run: sidekiq:' in gitlab_ctl_status.stdout"
@@ -296,7 +296,7 @@
 
 # ansible-role-postgres runs the scenario's `additional_sql_queries` as its superuser.
 - name: Verify the extension GitLab requires which only a superuser may create
-  when: gitlab_database_type == 'postgres'
+  when: gitlab_database_type | default(gitlab_defaults.gitlab_database_type) == 'postgres'
   block:
     - name: Query the Postgres extensions in the GitLab database
       ansible.builtin.command:
