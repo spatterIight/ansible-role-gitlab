@@ -104,7 +104,8 @@ gitlab_container_registry_http_host_bind_port: ""
 # A list of additional container networks that the container would be connected to.
 # The role does not create these networks, so make sure they already exist.
 # Use this to expose this container to another reverse proxy, which runs in a different container network.
-gitlab_container_additional_networks: "{{ gitlab_container_additional_networks_auto + gitlab_container_additional_networks_custom }}"
+gitlab_container_additional_networks: "{{ (gitlab_container_additional_networks_default + gitlab_container_additional_networks_auto + gitlab_container_additional_networks_custom) | unique }}"
+gitlab_container_additional_networks_default: []
 # gitlab_container_additional_networks_auto is reserved for usage by the playbook.
 # Your custom networks should go into gitlab_container_additional_networks_custom.
 gitlab_container_additional_networks_auto: []
@@ -252,13 +253,13 @@ gitlab_floc_optout_enabled: true
 gitlab_hsts_preload_enabled: false
 
 # List of systemd services that the GitLab systemd service depends on
-gitlab_systemd_required_services_list: "{{ gitlab_systemd_required_services_list_default + gitlab_systemd_required_services_list_auto + gitlab_systemd_required_services_list_custom }}"
+gitlab_systemd_required_services_list: "{{ (gitlab_systemd_required_services_list_default + gitlab_systemd_required_services_list_auto + gitlab_systemd_required_services_list_custom) | unique }}"
 gitlab_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
 gitlab_systemd_required_services_list_auto: []
 gitlab_systemd_required_services_list_custom: []
 
 # List of systemd services that the GitLab systemd service wants
-gitlab_systemd_wanted_services_list: "{{ gitlab_systemd_wanted_services_list_default + gitlab_systemd_wanted_services_list_auto + gitlab_systemd_wanted_services_list_custom }}"
+gitlab_systemd_wanted_services_list: "{{ (gitlab_systemd_wanted_services_list_default + gitlab_systemd_wanted_services_list_auto + gitlab_systemd_wanted_services_list_custom) | unique }}"
 gitlab_systemd_wanted_services_list_default: []
 gitlab_systemd_wanted_services_list_auto: []
 gitlab_systemd_wanted_services_list_custom: []
