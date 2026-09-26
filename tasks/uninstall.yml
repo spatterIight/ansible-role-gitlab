@@ -62,7 +62,8 @@
               {{ devture_systemd_docker_base_host_command_docker }} network rm
               {{ gitlab_container_network }}
           register: gitlab_network_deletion_result
-          changed_when: gitlab_container_network in gitlab_network_deletion_result.stdout
+          changed_when: gitlab_network_deletion_result.rc == 0
+          failed_when: gitlab_network_deletion_result.rc != 0 and 'not found' not in gitlab_network_deletion_result.stderr
 
 - name: Check existence of GitLab local data paths
   ansible.builtin.stat:
