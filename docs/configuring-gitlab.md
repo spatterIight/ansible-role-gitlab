@@ -238,9 +238,9 @@ To allow long-running requests, such as pushes of large repositories or uploads 
 
 # Your regular Traefik configuration here.
 
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_readTimeout: 1800s
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_writeTimeout: 1800s
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_idleTimeout: 1800s
+traefik_config_entrypoint_web_secure_transport_respondingTimeouts_readTimeout: 180s
+traefik_config_entrypoint_web_secure_transport_respondingTimeouts_writeTimeout: 180s
+traefik_config_entrypoint_web_secure_transport_respondingTimeouts_idleTimeout: 180s
 
 ########################################################################
 #                                                                      #
