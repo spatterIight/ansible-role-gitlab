@@ -247,8 +247,6 @@ traefik_config_entrypoint_web_secure_transport_respondingTimeouts_readTimeout: 9
 ########################################################################
 ```
 
-The write timeout (which limits clones and pulls) has no limit by default, and the idle timeout only applies to unused keep-alive connections, so neither needs to be changed.
-
 ### Extending the configuration
 
 GitLab has many more settings than the role exposes as variables (see [`defaults/main.yml`](../defaults/main.yml)). To configure any of them, add Ruby code to `gitlab_configuration_extension_rb`, which is appended to the generated [`gitlab.rb`](../templates/gitlab.rb.j2) and can override the role's settings. Refer to [GitLab's configuration template](https://gitlab.com/gitlab-org/omnibus-gitlab/-/blob/master/files/gitlab-config-template/gitlab.rb.template) for the available settings.
