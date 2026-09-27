@@ -227,7 +227,7 @@ Refer to [this page](https://docs.gitlab.com/omnibus/settings/memory_constrained
 
 ### Adjusting Traefik configuration for large pushes and uploads (optional; recommended)
 
-To allow long-running requests, such as pushes of large repositories or uploads over slow connections, raise Traefik's timeouts:
+To allow long-running uploads, such as pushes of large repositories or container registry uploads over slow connections, raise Traefik's read timeout (`300s` by default), which limits how long the whole request body can take to arrive:
 
 ```yaml
 ########################################################################
@@ -238,9 +238,7 @@ To allow long-running requests, such as pushes of large repositories or uploads 
 
 # Your regular Traefik configuration here.
 
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_readTimeout: 180s
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_writeTimeout: 180s
-traefik_config_entrypoint_web_secure_transport_respondingTimeouts_idleTimeout: 180s
+traefik_config_entrypoint_web_secure_transport_respondingTimeouts_readTimeout: 900s
 
 ########################################################################
 #                                                                      #
@@ -248,6 +246,8 @@ traefik_config_entrypoint_web_secure_transport_respondingTimeouts_idleTimeout: 1
 #                                                                      #
 ########################################################################
 ```
+
+The write timeout (which limits clones and pulls) has no limit by default, and the idle timeout only applies to unused keep-alive connections, so neither needs to be changed.
 
 ### Extending the configuration
 
